@@ -11,8 +11,8 @@ import {
 } from 'firebase/auth';
 import { 
   Users, Calculator, FileText, Plus, Trash2, 
-  Printer, Calendar, ArrowLeft,
-  LogOut, Building, Mail, Key, CheckCircle, ArrowRight
+  Printer, Calendar, ArrowLeft, X,
+  LogOut, Building, Mail, Key, CheckCircle, ArrowRight, AlertCircle
 } from 'lucide-react';
 
 // --- Suas Configurações Reais do Firebase ---
@@ -33,12 +33,35 @@ const db = getFirestore(app);
 export default function App() {
   const [user, setUser] = useState(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
-  const [view, setView] = useState('dashboard'); 
+  
+  // O Estado principal para os Funcionários e Folha
   const [employees, setEmployees] = useState([]);
   const [selectedPayroll, setSelectedPayroll] = useState(null); 
-  
-  // Controle de qual tela pública mostrar ('landing', 'login', 'register')
-  const [publicView, setPublicView] = useState('landing'); 
+
+  // --- SISTEMA DE ROTAS PROFISSIONAIS (URLs) ---
+  // Inicializa a rota. Se estiver num ambiente de preview, força a raiz '/'
+  const initialPath = window.location.href.startsWith('blob:') ? '/' : window.location.pathname;
+  const [currentPath, setCurrentPath] = useState(initialPath);
+
+  // Escuta os botões de "Voltar" e "Avançar" do navegador
+  useEffect(() => {
+    const handlePopState = () => setCurrentPath(window.location.pathname);
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  // Função mágica para mudar de página e atualizar a URL lá em cima
+  const navigate = (path) => {
+    try {
+      // Tenta mudar a URL, mas ignora se for no ambiente de preview bloqueado
+      if (!window.location.href.startsWith('blob:')) {
+        window.history.pushState({}, '', path);
+      }
+    } catch (error) {
+      console.warn("Alteração de URL bloqueada no preview. Navegando internamente.");
+    }
+    setCurrentPath(path);
+  };
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
@@ -47,6 +70,22 @@ export default function App() {
     });
     return () => unsubscribeAuth();
   }, []);
+
+  // Regras de Redirecionamento (Protegendo as páginas)
+  useEffect(() => {
+    if (!loadingAuth) {
+      const publicPaths = ['/', '/login', '/cadastro'];
+      const isPublicPath = publicPaths.includes(currentPath);
+
+      if (user && isPublicPath) {
+        // Se está logado e tentou ir pra tela de login, manda pro painel
+        navigate('/painel');
+      } else if (!user && !isPublicPath) {
+        // Se NÃO está logado e tentou acessar rota interna, manda pro login
+        navigate('/login');
+      }
+    }
+  }, [user, loadingAuth, currentPath]);
 
   useEffect(() => {
     if (!user) return;
@@ -67,36 +106,58 @@ export default function App() {
   const handleLogout = () => {
     signOut(auth);
     setEmployees([]);
-    setView('dashboard');
-    setPublicView('landing');
+    navigate('/');
   };
 
-  const renderView = () => {
-    switch(view) {
-      case 'employees': return <EmployeeManager employees={employees} userId={user.uid} db={db} />;
-      case 'payroll': return <PayrollCalculator employees={employees} onGenerate={(data) => { setSelectedPayroll(data); setView('print'); }} />;
-      case 'print': return <HoleriteView data={selectedPayroll} onBack={() => setView('payroll')} companyName={user.displayName || "Empresa Parceira"} />;
-      default: return <Dashboard changeView={setView} employees={employees} />;
-    }
-  };
-
-  if (loadingAuth) return <div className="flex items-center justify-center h-screen text-slate-500 font-bold bg-slate-50">Carregando sistema seguro...</div>;
-
-  // Roteamento Público (Sem usuário logado)
-  if (!user) {
-    if (publicView === 'landing') {
-      return <LandingPage onNavigate={setPublicView} />;
-    }
-    return <AuthScreen auth={auth} db={db} initialIsLogin={publicView === 'login'} onNavigate={setPublicView} />;
+  if (loadingAuth) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-slate-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mb-4"></div>
+        <p className="text-slate-500 font-bold tracking-widest uppercase text-sm">Carregando RH Fast...</p>
+      </div>
+    );
   }
 
-  // Se estiver logado, mostra o Painel
+  // --- ÁREA PÚBLICA (Sem usuário logado) ---
+  if (!user) {
+    switch (currentPath) {
+      case '/cadastro': 
+        return <AuthScreen auth={auth} db={db} initialIsLogin={false} navigate={navigate} />;
+      case '/login': 
+        return <AuthScreen auth={auth} db={db} initialIsLogin={true} navigate={navigate} />;
+      case '/':
+      default: 
+        return <LandingPage navigate={navigate} />;
+    }
+  }
+
+  // --- ÁREA PRIVADA (Usuário logado - SaaS) ---
+  const renderPrivateView = () => {
+    switch(currentPath) {
+      case '/funcionarios': 
+        return <EmployeeManager employees={employees} userId={user.uid} db={db} />;
+      case '/gerar-folha': 
+        return <PayrollCalculator employees={employees} onGenerate={(data) => { setSelectedPayroll(data); navigate('/holerites'); }} />;
+      case '/holerites': 
+        return <HoleriteView data={selectedPayroll} navigate={navigate} companyName={user.displayName || "Minha Empresa"} />;
+      case '/painel':
+      default: 
+        return <Dashboard navigate={navigate} employees={employees} />;
+    }
+  };
+
+  // Função auxiliar para pintar o botão ativo no menu
+  const getNavClass = (path) => {
+    const baseClass = "px-3 py-2 rounded-lg transition hover:bg-blue-600";
+    return currentPath === path ? `${baseClass} bg-blue-800 font-bold shadow-inner` : baseClass;
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 selection:bg-blue-200">
       {/* Header do Sistema */}
-      <header className="bg-blue-700 text-white p-4 shadow-lg print:hidden">
+      <header className="bg-blue-700 text-white p-4 shadow-lg print:hidden sticky top-0 z-50">
         <div className="max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate('/painel')}>
             <div className="bg-white text-blue-700 p-2 rounded-lg shadow-sm">
               <Building className="h-6 w-6" />
             </div>
@@ -107,9 +168,9 @@ export default function App() {
           </div>
           
           <nav className="flex flex-wrap justify-center gap-2 md:gap-4 text-sm font-medium">
-            <button onClick={() => setView('dashboard')} className={`px-3 py-2 rounded-lg transition hover:bg-blue-600 ${view === 'dashboard' ? 'bg-blue-800 font-bold shadow-inner' : ''}`}>Início</button>
-            <button onClick={() => setView('employees')} className={`px-3 py-2 rounded-lg transition hover:bg-blue-600 ${view === 'employees' ? 'bg-blue-800 font-bold shadow-inner' : ''}`}>Equipe</button>
-            <button onClick={() => setView('payroll')} className={`px-3 py-2 rounded-lg transition hover:bg-blue-600 ${view === 'payroll' ? 'bg-blue-800 font-bold shadow-inner' : ''}`}>Gerar Folha</button>
+            <button onClick={() => navigate('/painel')} className={getNavClass('/painel')}>Início</button>
+            <button onClick={() => navigate('/funcionarios')} className={getNavClass('/funcionarios')}>Equipe</button>
+            <button onClick={() => navigate('/gerar-folha')} className={getNavClass('/gerar-folha')}>Gerar Folha</button>
             <button onClick={handleLogout} className="px-3 py-2 rounded-lg transition hover:bg-red-500 hover:border-transparent flex items-center gap-1 ml-2 border border-blue-400">
               <LogOut size={16}/> Sair
             </button>
@@ -117,33 +178,30 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto p-4 md:p-6">
-        {renderView()}
+      <main className="max-w-5xl mx-auto p-4 md:p-6 animate-fade-in">
+        {renderPrivateView()}
       </main>
     </div>
   );
 }
 
-// --- Componentes Novos: Landing Page e Login Melhorado ---
-
-// Página de Apresentação (Site Oficial)
-function LandingPage({ onNavigate }) {
+function LandingPage({ navigate }) {
   return (
     <div className="min-h-screen bg-slate-50 font-sans selection:bg-blue-200">
       {/* Menu Superior do Site */}
       <nav className="bg-white border-b border-slate-200 sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center gap-2">
-            <div className="bg-blue-700 text-white p-1.5 rounded-lg">
+            <div className="bg-blue-700 text-white p-1.5 rounded-lg shadow-md">
               <Building className="h-6 w-6" />
             </div>
             <span className="text-2xl font-black text-slate-800 tracking-tight">RH Fast<span className="text-blue-600">.</span></span>
           </div>
           <div className="flex gap-2 md:gap-4 items-center text-sm font-bold">
-            <button onClick={() => onNavigate('login')} className="text-slate-600 hover:text-blue-700 transition px-3 py-2">
+            <button onClick={() => navigate('/login')} className="text-slate-600 hover:text-blue-700 transition px-3 py-2">
               Entrar
             </button>
-            <button onClick={() => onNavigate('register')} className="bg-blue-600 text-white px-5 py-2.5 rounded-full hover:bg-blue-700 transition shadow-lg shadow-blue-200">
+            <button onClick={() => navigate('/cadastro')} className="bg-blue-600 text-white px-5 py-2.5 rounded-full hover:bg-blue-700 transition shadow-lg shadow-blue-200">
               Criar Conta Grátis
             </button>
           </div>
@@ -153,8 +211,8 @@ function LandingPage({ onNavigate }) {
       {/* Hero Section */}
       <div className="max-w-6xl mx-auto px-4 py-16 md:py-24 grid md:grid-cols-2 gap-12 items-center">
         <div className="space-y-6">
-          <div className="inline-block bg-blue-100 text-blue-800 font-bold text-xs px-3 py-1 rounded-full uppercase tracking-widest mb-2">
-            Para Pequenas Empresas
+          <div className="inline-flex items-center gap-2 bg-blue-100 text-blue-800 font-bold text-xs px-4 py-1.5 rounded-full uppercase tracking-widest mb-2 shadow-sm">
+            <CheckCircle size={14} /> Feito para Pequenas Empresas
           </div>
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-slate-900 leading-[1.1]">
             Chega de planilhas. <br/>
@@ -164,19 +222,19 @@ function LandingPage({ onNavigate }) {
             O RH Fast foi criado para o empresário que não tem tempo a perder. Cadastre funcionários, calcule dias trabalhados e gere holerites em poucos cliques. Tudo na nuvem, simples e seguro.
           </p>
           <div className="flex gap-4 pt-4">
-            <button onClick={() => onNavigate('register')} className="bg-blue-600 text-white px-8 py-4 rounded-full font-bold text-lg hover:bg-blue-700 transition shadow-xl shadow-blue-200 flex items-center gap-2">
+            <button onClick={() => navigate('/cadastro')} className="bg-blue-600 text-white px-8 py-4 rounded-full font-bold text-lg hover:bg-blue-700 transition shadow-xl shadow-blue-200 flex items-center gap-2 hover:-translate-y-1">
               Começar Agora <ArrowRight size={20} />
             </button>
           </div>
         </div>
         
         {/* Imagem/Ilustração da Hero */}
-        <div className="relative">
+        <div className="relative animate-fade-in">
           <div className="absolute inset-0 bg-blue-600 rounded-[2rem] transform rotate-3 opacity-10"></div>
           <div className="bg-white border border-slate-200 shadow-2xl rounded-[2rem] p-6 relative z-10">
             <div className="border-b border-slate-100 pb-4 mb-4 flex justify-between items-center">
               <div className="font-black text-slate-800">Resumo da Folha</div>
-              <div className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-bold">Gerado com Sucesso</div>
+              <div className="text-xs bg-green-100 text-green-700 px-3 py-1 rounded-full font-bold">Ref: Novembro</div>
             </div>
             <div className="space-y-3">
               {[
@@ -184,16 +242,19 @@ function LandingPage({ onNavigate }) {
                 { name: 'João Santos', role: 'Diarista (15 dias)', val: 'R$ 1.500' },
                 { name: 'Ana Souza', role: 'Mensalista', val: 'R$ 3.200' }
               ].map((i, idx) => (
-                <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl">
-                  <div>
-                    <div className="font-bold text-slate-800 text-sm">{i.name}</div>
-                    <div className="text-xs text-slate-500">{i.role}</div>
+                <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 hover:bg-slate-100 transition rounded-xl border border-transparent hover:border-slate-200">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-slate-200 p-2 rounded-full"><Users size={16} className="text-slate-600"/></div>
+                    <div>
+                      <div className="font-bold text-slate-800 text-sm">{i.name}</div>
+                      <div className="text-xs text-slate-500">{i.role}</div>
+                    </div>
                   </div>
                   <div className="font-mono font-bold text-slate-700">{i.val}</div>
                 </div>
               ))}
             </div>
-            <button className="w-full mt-4 bg-slate-800 text-white py-3 rounded-xl font-bold flex justify-center items-center gap-2">
+            <button className="w-full mt-6 bg-slate-800 text-white py-3 rounded-xl font-bold flex justify-center items-center gap-2 hover:bg-slate-900 transition">
               <Printer size={18} /> Imprimir Recibos
             </button>
           </div>
@@ -201,81 +262,116 @@ function LandingPage({ onNavigate }) {
       </div>
 
       {/* Funcionalidades */}
-      <div className="bg-slate-900 text-white py-20">
+      <div className="bg-slate-900 text-white py-24">
         <div className="max-w-6xl mx-auto px-4">
           <div className="text-center mb-16">
-            <h2 className="text-3xl font-black mb-4">Tudo que sua empresa precisa</h2>
-            <p className="text-slate-400">Desenvolvido focado na praticidade do dia a dia.</p>
+            <h2 className="text-3xl md:text-4xl font-black mb-4">Tudo que sua empresa precisa</h2>
+            <p className="text-slate-400 text-lg">Desenvolvido focado na praticidade do dia a dia.</p>
           </div>
           <div className="grid md:grid-cols-3 gap-8">
             {[
-              { title: "Gestão de Equipe", desc: "Cadastre diaristas ou mensalistas em segundos, mantendo o controle total do seu time." },
-              { title: "Cálculo Automático", desc: "Apenas informe os dias trabalhados. O sistema calcula proporcionais e diárias automaticamente." },
-              { title: "Holerites em 1 Clique", desc: "Gere recibos com visual profissional prontos para imprimir e pegar a assinatura do funcionário." }
+              { title: "Gestão de Equipe", desc: "Cadastre diaristas ou mensalistas em segundos, mantendo o controle total do seu time e histórico salarial." },
+              { title: "Cálculo Automático", desc: "Apenas informe os dias trabalhados. O sistema calcula proporcionais e diárias automaticamente sem dor de cabeça." },
+              { title: "Holerites em 1 Clique", desc: "Gere recibos com visual profissional prontos para imprimir e pegar a assinatura do funcionário na hora." }
             ].map((f, i) => (
-              <div key={i} className="bg-slate-800 p-8 rounded-2xl border border-slate-700">
-                <CheckCircle className="text-blue-400 w-10 h-10 mb-4" />
-                <h3 className="text-xl font-bold mb-2">{f.title}</h3>
-                <p className="text-slate-400 text-sm leading-relaxed">{f.desc}</p>
+              <div key={i} className="bg-slate-800/50 p-8 rounded-3xl border border-slate-700 hover:border-blue-500 transition-colors">
+                <div className="bg-blue-500/10 w-16 h-16 rounded-2xl flex items-center justify-center mb-6">
+                  <CheckCircle className="text-blue-400 w-8 h-8" />
+                </div>
+                <h3 className="text-xl font-bold mb-3">{f.title}</h3>
+                <p className="text-slate-400 leading-relaxed">{f.desc}</p>
               </div>
             ))}
           </div>
         </div>
       </div>
       
-      <footer className="bg-slate-950 py-8 text-center text-slate-500 text-sm">
+      <footer className="bg-slate-950 py-10 text-center text-slate-500 text-sm font-medium border-t border-slate-900">
         &copy; {new Date().getFullYear()} RH Fast SaaS. Todos os direitos reservados.
       </footer>
     </div>
   );
 }
 
-// Tela de Login e Cadastro
-function AuthScreen({ auth, db, initialIsLogin, onNavigate }) {
+function AuthScreen({ auth, db, initialIsLogin, navigate }) {
   const [isLogin, setIsLogin] = useState(initialIsLogin);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [empresa, setEmpresa] = useState('');
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState(''); // Estado para mensagem de erro profissional
+  const [successMsg, setSuccessMsg] = useState(''); // Estado para mensagem de sucesso
+
+  // Muda a rota visualmente se a pessoa alternar entre login e cadastro
+  const toggleMode = () => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    if (isLogin) {
+      setIsLogin(false);
+      window.history.replaceState({}, '', '/cadastro');
+    } else {
+      setIsLogin(true);
+      window.history.replaceState({}, '', '/login');
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
     try {
       if (isLogin) {
         await signInWithEmailAndPassword(auth, email, password);
+        // O redirect pro painel é feito automaticamente pelo useEffect principal
       } else {
+        if (password.length < 6) {
+          setErrorMsg("A senha precisa ter no mínimo 6 caracteres.");
+          setLoading(false);
+          return;
+        }
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        // Cria o registro da empresa no banco
         await setDoc(doc(db, 'companies', userCredential.user.uid), {
           nomeEmpresa: empresa,
           email: email,
           dataCadastro: new Date()
         });
-        alert("Conta criada com sucesso! Bem-vindo ao RH Fast.");
+        setSuccessMsg("Conta criada com sucesso! Redirecionando...");
+        // Redirect é automático
       }
     } catch (error) {
       console.error(error);
-      alert(isLogin ? "Erro ao entrar. Verifique e-mail e senha." : "Erro ao criar conta. A senha deve ter 6+ caracteres.");
+      if (isLogin) {
+        setErrorMsg("E-mail ou senha incorretos. Verifique e tente novamente.");
+      } else {
+        if (error.code === 'auth/email-already-in-use') {
+          setErrorMsg("Este e-mail já está cadastrado no sistema.");
+        } else {
+          setErrorMsg("Erro ao criar conta. Tente novamente mais tarde.");
+        }
+      }
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col justify-center relative p-4">
+    <div className="min-h-screen bg-slate-50 flex flex-col justify-center relative p-4 selection:bg-blue-200">
       
       {/* Botão de Voltar ao Site */}
       <button 
-        onClick={() => onNavigate('landing')} 
-        className="absolute top-6 left-6 flex items-center gap-2 text-slate-500 hover:text-blue-600 font-bold transition px-4 py-2 rounded-lg hover:bg-blue-50"
+        onClick={() => navigate('/')} 
+        className="absolute top-6 left-6 md:top-8 md:left-8 flex items-center gap-2 text-slate-500 hover:text-blue-600 font-bold transition px-4 py-2 rounded-xl hover:bg-blue-100"
       >
-        <ArrowLeft size={20} /> Voltar ao site
+        <ArrowLeft size={20} /> <span className="hidden md:inline">Voltar ao site</span>
       </button>
 
-      <div className="bg-white p-8 md:p-10 rounded-2xl shadow-2xl w-full max-w-md mx-auto border border-slate-100">
+      <div className="bg-white p-8 md:p-10 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] w-full max-w-md mx-auto border border-slate-100">
         <div className="flex justify-center mb-6">
-          <div className="bg-gradient-to-br from-blue-600 to-blue-800 text-white p-4 rounded-xl shadow-lg shadow-blue-200">
-            <Building size={40} />
+          <div className="bg-gradient-to-br from-blue-600 to-blue-800 text-white p-4 rounded-2xl shadow-lg shadow-blue-200 transform -rotate-3">
+            <Building size={40} className="transform rotate-3" />
           </div>
         </div>
         
@@ -284,39 +380,58 @@ function AuthScreen({ auth, db, initialIsLogin, onNavigate }) {
           {isLogin ? 'Acesse o painel da sua empresa' : 'Cadastre sua empresa gratuitamente'}
         </p>
 
+        {/* Mensagens de Alerta Bonitas */}
+        {errorMsg && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex gap-3 text-red-700 animate-fade-in">
+            <AlertCircle size={20} className="flex-shrink-0 mt-0.5" />
+            <p className="text-sm font-medium leading-relaxed">{errorMsg}</p>
+          </div>
+        )}
+
+        {successMsg && (
+          <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl flex gap-3 text-green-700 animate-fade-in">
+            <CheckCircle size={20} className="flex-shrink-0 mt-0.5" />
+            <p className="text-sm font-medium leading-relaxed">{successMsg}</p>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-5">
           {!isLogin && (
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">Nome da Empresa</label>
               <div className="relative">
-                <Building className="absolute left-3.5 top-3.5 text-slate-400" size={20} />
-                <input required type="text" value={empresa} onChange={e => setEmpresa(e.target.value)} className="w-full pl-11 p-3.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 text-slate-800 font-medium transition" placeholder="Ex: Padaria do João" />
+                <Building className="absolute left-4 top-3.5 text-slate-400" size={20} />
+                <input required type="text" value={empresa} onChange={e => setEmpresa(e.target.value)} className="w-full pl-12 p-3.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 hover:bg-white text-slate-800 font-medium transition-all" placeholder="Ex: Padaria do João" />
               </div>
             </div>
           )}
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1">E-mail Profissional</label>
             <div className="relative">
-              <Mail className="absolute left-3.5 top-3.5 text-slate-400" size={20} />
-              <input required type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full pl-11 p-3.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 text-slate-800 font-medium transition" placeholder="seu@email.com" />
+              <Mail className="absolute left-4 top-3.5 text-slate-400" size={20} />
+              <input required type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full pl-12 p-3.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 hover:bg-white text-slate-800 font-medium transition-all" placeholder="seu@email.com" />
             </div>
           </div>
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1">Senha</label>
             <div className="relative">
-              <Key className="absolute left-3.5 top-3.5 text-slate-400" size={20} />
-              <input required type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full pl-11 p-3.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 text-slate-800 font-medium transition" placeholder="••••••••" />
+              <Key className="absolute left-4 top-3.5 text-slate-400" size={20} />
+              <input required type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full pl-12 p-3.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-slate-50 hover:bg-white text-slate-800 font-medium transition-all" placeholder="••••••••" />
             </div>
           </div>
           
-          <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white font-bold p-4 rounded-xl hover:bg-blue-700 transition shadow-lg shadow-blue-200 disabled:opacity-70 mt-4 text-lg">
-            {loading ? 'Aguarde...' : (isLogin ? 'Entrar no Sistema' : 'Criar Conta Grátis')}
+          <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white font-bold p-4 rounded-xl hover:bg-blue-700 transition-all shadow-[0_4px_14px_0_rgb(37,99,235,0.39)] hover:shadow-[0_6px_20px_rgba(37,99,235,0.23)] hover:-translate-y-0.5 disabled:opacity-70 disabled:hover:translate-y-0 mt-4 text-lg">
+            {loading ? (
+              <span className="flex items-center justify-center gap-2">
+                <div className="animate-spin h-5 w-5 border-2 border-white border-t-transparent rounded-full"></div> Aguarde...
+              </span>
+            ) : (isLogin ? 'Entrar no Sistema' : 'Criar Conta Grátis')}
           </button>
         </form>
 
         <div className="mt-8 text-center pt-6 border-t border-slate-100">
           <p className="text-slate-500 mb-2">{isLogin ? 'Novo por aqui?' : 'Já possui uma conta?'}</p>
-          <button onClick={() => setIsLogin(!isLogin)} className="text-sm font-bold text-blue-600 hover:text-blue-800 hover:underline transition">
+          <button type="button" onClick={toggleMode} className="text-sm font-bold text-blue-600 hover:text-blue-800 transition">
             {isLogin ? 'Crie uma conta para sua empresa' : 'Faça login com seu e-mail'}
           </button>
         </div>
@@ -325,46 +440,57 @@ function AuthScreen({ auth, db, initialIsLogin, onNavigate }) {
   );
 }
 
-// 1. Dashboard
-function Dashboard({ changeView, employees }) {
+function Dashboard({ navigate, employees }) {
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="text-center py-8">
-        <h2 className="text-2xl font-bold text-slate-700">Bem-vindo ao seu RH</h2>
-        <p className="text-slate-500">Gerencie sua equipe de forma simples e rápida, sem planilhas complexas.</p>
+    <div className="space-y-6">
+      <div className="text-center py-10 md:py-16">
+        <h2 className="text-3xl font-black text-slate-800 mb-2">Resumo da sua Empresa</h2>
+        <p className="text-slate-500 font-medium text-lg">Selecione uma das opções abaixo para começar.</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-3xl mx-auto">
-        <div onClick={() => changeView('employees')} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 cursor-pointer hover:shadow-lg hover:-translate-y-1 transition-all flex flex-col items-center gap-3 text-center">
-          <div className="bg-blue-100 p-4 rounded-full text-blue-600">
-            <Users size={32} />
+        <div onClick={() => navigate('/funcionarios')} className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 cursor-pointer hover:shadow-xl hover:border-blue-300 hover:-translate-y-1 transition-all flex flex-col items-center gap-4 text-center group">
+          <div className="bg-blue-50 group-hover:bg-blue-600 group-hover:text-white text-blue-600 p-5 rounded-2xl transition-colors">
+            <Users size={40} />
           </div>
-          <h3 className="text-xl font-bold text-slate-800">Funcionários</h3>
-          <p className="text-sm text-slate-500 font-medium">{employees.length} colaboradores cadastrados</p>
+          <div>
+            <h3 className="text-2xl font-bold text-slate-800 mb-1">Gerir Equipe</h3>
+            <p className="text-slate-500 font-medium">{employees.length} colaboradores cadastrados</p>
+          </div>
         </div>
 
-        <div onClick={() => changeView('payroll')} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 cursor-pointer hover:shadow-lg hover:-translate-y-1 transition-all flex flex-col items-center gap-3 text-center">
-          <div className="bg-green-100 p-4 rounded-full text-green-600">
-            <Calculator size={32} />
+        <div onClick={() => navigate('/gerar-folha')} className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 cursor-pointer hover:shadow-xl hover:border-green-300 hover:-translate-y-1 transition-all flex flex-col items-center gap-4 text-center group">
+          <div className="bg-green-50 group-hover:bg-green-600 group-hover:text-white text-green-600 p-5 rounded-2xl transition-colors">
+            <Calculator size={40} />
           </div>
-          <h3 className="text-xl font-bold text-slate-800">Calcular Folha</h3>
-          <p className="text-sm text-slate-500 font-medium">Lançar dias e gerar holerites</p>
+          <div>
+            <h3 className="text-2xl font-bold text-slate-800 mb-1">Calcular Folha</h3>
+            <p className="text-slate-500 font-medium">Lançar dias e gerar recibos</p>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-// 2. Gerenciador de Funcionários
 function EmployeeManager({ employees, userId, db }) {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [formData, setFormData] = useState({ name: '', role: '', baseValue: '', type: 'mensalista' });
+  const [errorMsg, setErrorMsg] = useState('');
+  
+  // Estado para controlar quem estamos tentando deletar (Confirmação visual)
+  const [deletingId, setDeletingId] = useState(null);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.name || !formData.baseValue) return;
+    setErrorMsg('');
+
+    if (!formData.name || !formData.baseValue) {
+      setErrorMsg("Preencha todos os campos corretamente.");
+      return;
+    }
+
     try {
-      // Salva no banco de dados exclusivo desta empresa
       await addDoc(collection(db, 'companies', userId, 'employees'), {
         name: formData.name,
         role: formData.role,
@@ -376,87 +502,110 @@ function EmployeeManager({ employees, userId, db }) {
       setIsFormOpen(false);
     } catch (error) {
       console.error("Erro ao salvar:", error);
-      alert("Erro ao salvar funcionário.");
+      setErrorMsg("Ocorreu um erro de conexão ao salvar.");
     }
   };
 
-  const handleDelete = async (id) => {
-    if (confirm('Tem certeza que deseja excluir este funcionário?')) {
+  const confirmDelete = async (id) => {
+    try {
       await deleteDoc(doc(db, 'companies', userId, 'employees', id));
+      setDeletingId(null);
+    } catch (error) {
+      console.error("Erro ao excluir:", error);
     }
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-        <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Users className="text-blue-600"/> Equipe</h2>
-        <button onClick={() => setIsFormOpen(!isFormOpen)} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700 transition font-bold shadow-sm">
-          <Plus size={18} /> Novo Funcionário
+    <div className="space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200 gap-4">
+        <h2 className="text-2xl font-black text-slate-800 flex items-center gap-3"><Users className="text-blue-600"/> Sua Equipe</h2>
+        <button onClick={() => { setIsFormOpen(!isFormOpen); setErrorMsg(''); }} className="w-full md:w-auto bg-blue-600 text-white px-6 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 transition font-bold shadow-sm">
+          {isFormOpen ? <><X size={20} /> Fechar Painel</> : <><Plus size={20} /> Novo Funcionário</>}
         </button>
       </div>
 
       {isFormOpen && (
-        <form onSubmit={handleSubmit} className="bg-white p-6 rounded-xl shadow-md border-2 border-blue-100">
-          <h3 className="font-bold mb-4 text-blue-800 flex items-center gap-2">Cadastrar Novo Colaborador</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <form onSubmit={handleSubmit} className="bg-white p-6 md:p-8 rounded-2xl shadow-lg border-2 border-blue-100 animate-fade-in relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-2 h-full bg-blue-600"></div>
+          <h3 className="font-black text-xl mb-6 text-slate-800 flex items-center gap-2">Cadastrar Novo Colaborador</h3>
+          
+          {errorMsg && (
+            <div className="mb-6 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm font-bold flex items-center gap-2">
+              <AlertCircle size={18} /> {errorMsg}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">Nome Completo</label>
-              <input type="text" required className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Ex: João da Silva" />
+              <label className="block text-sm font-bold text-slate-700 mb-2">Nome Completo</label>
+              <input type="text" required className="w-full p-3.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition bg-slate-50 focus:bg-white" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Ex: João da Silva" />
             </div>
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">Cargo / Função</label>
-              <input type="text" required className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})} placeholder="Ex: Vendedor" />
+              <label className="block text-sm font-bold text-slate-700 mb-2">Cargo / Função</label>
+              <input type="text" required className="w-full p-3.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition bg-slate-50 focus:bg-white" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})} placeholder="Ex: Vendedor" />
             </div>
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">Forma de Pagamento</label>
-              <select className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-medium" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})}>
+              <label className="block text-sm font-bold text-slate-700 mb-2">Forma de Pagamento</label>
+              <select className="w-full p-3.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-medium transition bg-slate-50 focus:bg-white" value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})}>
                 <option value="mensalista">Mensalista (Salário Fixo / Mês)</option>
                 <option value="diarista">Diarista (Valor Fixo / Dia Trabalhado)</option>
               </select>
             </div>
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">
+              <label className="block text-sm font-bold text-slate-700 mb-2">
                 {formData.type === 'mensalista' ? 'Salário Mensal Bruto (R$)' : 'Valor da Diária (R$)'}
               </label>
-              <input type="number" required step="0.01" className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono" value={formData.baseValue} onChange={e => setFormData({...formData, baseValue: e.target.value})} placeholder="0.00" />
+              <input type="number" required step="0.01" min="1" className="w-full p-3.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-mono font-bold text-lg transition bg-slate-50 focus:bg-white" value={formData.baseValue} onChange={e => setFormData({...formData, baseValue: e.target.value})} placeholder="0.00" />
             </div>
           </div>
-          <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-4">
-            <button type="button" onClick={() => setIsFormOpen(false)} className="px-5 py-2 font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition">Cancelar</button>
-            <button type="submit" className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-bold shadow-md transition">Salvar Cadastro</button>
+          <div className="mt-8 flex flex-col-reverse md:flex-row justify-end gap-3 border-t border-slate-100 pt-6">
+            <button type="button" onClick={() => setIsFormOpen(false)} className="px-6 py-3 font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition w-full md:w-auto">Cancelar</button>
+            <button type="submit" className="px-8 py-3 bg-green-600 text-white rounded-xl hover:bg-green-700 font-bold shadow-md transition w-full md:w-auto flex justify-center items-center gap-2"><CheckCircle size={20}/> Salvar Cadastro</button>
           </div>
         </form>
       )}
 
-      <div className="grid grid-cols-1 gap-3">
+      <div className="grid grid-cols-1 gap-4">
         {employees.map(emp => (
-          <div key={emp.id} className="bg-white p-5 rounded-xl border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center shadow-sm hover:border-blue-300 hover:shadow-md transition">
-            <div className="mb-2 md:mb-0">
-              <h4 className="font-bold text-lg text-slate-800">{emp.name}</h4>
-              <p className="text-slate-500 text-sm flex items-center gap-2 mt-1">
-                <span className="bg-slate-100 px-2 py-1 rounded text-xs font-medium border border-slate-200">{emp.role}</span>
+          <div key={emp.id} className="bg-white p-6 rounded-2xl border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center shadow-sm hover:border-blue-300 hover:shadow-md transition gap-4">
+            <div>
+              <h4 className="font-black text-xl text-slate-800">{emp.name}</h4>
+              <p className="text-slate-500 text-sm mt-1 flex items-center gap-2">
+                <span className="bg-slate-100 px-3 py-1 rounded-md font-bold uppercase tracking-wider text-[10px]">{emp.role}</span>
               </p>
             </div>
-            <div className="flex items-center justify-between w-full md:w-auto gap-6">
+            
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between w-full md:w-auto gap-4 md:gap-8">
               <div className="text-left md:text-right">
-                <p className="font-mono font-black text-slate-700 text-lg">
+                <p className="font-mono font-black text-slate-800 text-xl">
                   {Number(emp.baseValue).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                  <span className={`ml-2 text-[10px] px-2 py-1 rounded-full font-sans font-bold uppercase ${emp.type === 'mensalista' ? 'bg-indigo-100 text-indigo-700' : 'bg-orange-100 text-orange-700'}`}>
+                  <span className={`ml-2 text-[10px] px-2 py-1.5 rounded-md font-sans font-black uppercase tracking-widest ${emp.type === 'mensalista' ? 'bg-indigo-100 text-indigo-700' : 'bg-orange-100 text-orange-700'}`}>
                     {emp.type === 'mensalista' ? 'Mensal' : 'Por Dia'}
                   </span>
                 </p>
               </div>
-              <button onClick={() => handleDelete(emp.id)} className="text-slate-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition border border-transparent hover:border-red-100" title="Excluir">
-                <Trash2 size={20} />
-              </button>
+
+              {/* Sistema de Deletar sem Alert() */}
+              {deletingId === emp.id ? (
+                <div className="flex items-center gap-2 animate-fade-in w-full md:w-auto">
+                  <span className="text-xs font-bold text-red-500 whitespace-nowrap">Excluir?</span>
+                  <button onClick={() => confirmDelete(emp.id)} className="bg-red-500 text-white px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-red-600 shadow-sm flex-1 md:flex-none">Sim</button>
+                  <button onClick={() => setDeletingId(null)} className="bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-bold hover:bg-slate-300 shadow-sm flex-1 md:flex-none">Não</button>
+                </div>
+              ) : (
+                <button onClick={() => setDeletingId(emp.id)} className="text-slate-400 hover:text-red-500 p-3 rounded-xl hover:bg-red-50 transition border border-transparent hover:border-red-100 w-full md:w-auto flex justify-center" title="Excluir Colaborador">
+                  <Trash2 size={22} />
+                </button>
+              )}
             </div>
           </div>
         ))}
+
         {employees.length === 0 && (
-          <div className="text-center py-16 bg-white text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
-            <Users size={48} className="mx-auto mb-4 opacity-20" />
-            <p className="font-bold text-lg text-slate-500">Nenhum funcionário cadastrado.</p>
-            <p className="text-sm mt-1">Clique no botão "Novo Funcionário" acima para começar.</p>
+          <div className="text-center py-20 bg-white text-slate-400 border-2 border-dashed border-slate-200 rounded-3xl">
+            <Users size={64} className="mx-auto mb-4 opacity-20" />
+            <p className="font-black text-xl text-slate-500">Nenhum colaborador cadastrado.</p>
+            <p className="font-medium mt-2">Clique no botão azul "Novo Funcionário" para começar.</p>
           </div>
         )}
       </div>
@@ -464,16 +613,18 @@ function EmployeeManager({ employees, userId, db }) {
   );
 }
 
-// 3. Calculadora de Folha
 function PayrollCalculator({ employees, onGenerate }) {
   const [inputs, setInputs] = useState({});
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)); 
+  const [errorMsg, setErrorMsg] = useState('');
 
   const handleInputChange = (id, value) => {
+    setErrorMsg('');
     setInputs(prev => ({ ...prev, [id]: value }));
   };
 
   const calculate = () => {
+    setErrorMsg('');
     const results = employees.map(emp => {
       const days = parseFloat(inputs[emp.id] || 0);
       let total = 0;
@@ -481,72 +632,82 @@ function PayrollCalculator({ employees, onGenerate }) {
 
       if (emp.type === 'mensalista') {
         total = (emp.baseValue / 30) * days;
-        description = `Salário Mensal Proporcional (${days} dias)`;
+        description = `Salário Proporcional (${days} dias)`;
       } else {
         total = emp.baseValue * days;
-        description = `Diárias de Serviço (${days} dias x ${Number(emp.baseValue).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})`;
+        description = `Diárias Trabalhadas (${days} dias x ${Number(emp.baseValue).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})`;
       }
 
       return { ...emp, daysWorked: days, totalReceive: total, description };
     });
 
     const validResults = results.filter(r => r.daysWorked > 0);
+    
+    // Tratamento de Erro Visual, sem Alerts
     if (validResults.length === 0) {
-      alert("Por favor, insira os dias trabalhados (maior que zero) para pelo menos um funcionário antes de gerar os holerites.");
+      setErrorMsg("Você precisa inserir os dias trabalhados (maior que zero) para pelo menos um funcionário antes de gerar os holerites.");
       return;
     }
+    
     onGenerate({ period: month, items: validResults });
   };
 
   return (
     <div className="space-y-6">
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-        <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-          <Calendar className="text-green-600" /> Fechamento de Folha
+      <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-200">
+        <h2 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-3">
+          <div className="bg-green-100 text-green-600 p-2 rounded-xl"><Calendar size={24} /></div> Fechamento de Folha
         </h2>
         
-        <div className="mb-6 bg-green-50 p-4 rounded-xl border border-green-100 flex flex-col md:flex-row items-start md:items-center gap-4 shadow-inner">
-          <label className="text-sm font-bold text-green-900 whitespace-nowrap uppercase tracking-wider">Mês de Referência:</label>
-          <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="p-2 border border-green-200 rounded-lg bg-white shadow-sm focus:ring-2 focus:ring-green-500 font-bold text-slate-700 outline-none w-full md:w-auto" />
+        <div className="mb-8 bg-green-50 p-5 rounded-2xl border border-green-200 flex flex-col md:flex-row items-start md:items-center gap-4">
+          <label className="text-sm font-black text-green-900 uppercase tracking-wider">Mês de Referência da Folha:</label>
+          <input type="month" value={month} onChange={e => setMonth(e.target.value)} className="p-3 border border-green-300 rounded-xl bg-white shadow-sm focus:ring-2 focus:ring-green-500 font-bold text-slate-800 outline-none w-full md:w-auto" />
         </div>
 
         <div className="space-y-3">
-          <div className="hidden md:grid grid-cols-12 gap-2 text-xs font-black text-slate-400 uppercase tracking-wider mb-2 px-4">
+          <div className="hidden md:grid grid-cols-12 gap-4 text-xs font-black text-slate-400 uppercase tracking-widest mb-3 px-4">
             <div className="col-span-6">Colaborador / Contrato</div>
             <div className="col-span-3 text-center">Base de Cálculo</div>
             <div className="col-span-3 text-right">Dias Lançados</div>
           </div>
           
           {employees.map(emp => (
-            <div key={emp.id} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center bg-white hover:bg-slate-50 p-4 rounded-xl border border-slate-200 transition shadow-sm">
+            <div key={emp.id} className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center bg-white hover:bg-slate-50 p-5 rounded-2xl border border-slate-200 transition shadow-sm">
               <div className="col-span-1 md:col-span-6">
-                <p className="font-bold text-slate-800 text-lg">{emp.name}</p>
-                <p className="text-xs font-bold text-slate-500 uppercase mt-1">{emp.role}</p>
+                <p className="font-black text-slate-800 text-lg">{emp.name}</p>
+                <p className="text-xs font-bold text-slate-500 uppercase mt-1 tracking-wider">{emp.role}</p>
               </div>
-              <div className="col-span-1 md:col-span-3 text-left md:text-center">
-                <span className={`text-xs font-bold px-2 py-1 rounded-md border ${emp.type === 'mensalista' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' : 'bg-orange-50 text-orange-700 border-orange-100'}`}>
-                  {emp.type === 'mensalista' ? 'MENSAL:' : 'DIÁRIA:'} <span className="font-mono">{Number(emp.baseValue).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+              <div className="col-span-1 md:col-span-3 text-left md:text-center border-t border-slate-100 md:border-none pt-3 md:pt-0">
+                <span className={`text-xs font-black px-3 py-1.5 rounded-lg border uppercase tracking-wide ${emp.type === 'mensalista' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' : 'bg-orange-50 text-orange-700 border-orange-100'}`}>
+                  {emp.type === 'mensalista' ? 'Mensal' : 'Diária'}: <span className="font-mono">{Number(emp.baseValue).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                 </span>
               </div>
               <div className="col-span-1 md:col-span-3 relative">
-                <label className="block md:hidden text-xs font-bold text-slate-500 mb-1 uppercase">Dias Trabalhados:</label>
+                <label className="block md:hidden text-xs font-black text-slate-400 mb-2 uppercase tracking-widest mt-2 border-t border-slate-100 pt-3">Dias Trabalhados no mês:</label>
                 <div className="relative">
-                  <input type="number" min="0" max="31" placeholder="0" className="w-full p-3 pr-8 border border-slate-300 rounded-lg text-right font-black text-xl text-green-700 focus:ring-2 focus:ring-green-500 outline-none shadow-inner bg-slate-50" onChange={(e) => handleInputChange(emp.id, e.target.value)} />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400 pointer-events-none">d</span>
+                  <input type="number" min="0" max="31" placeholder="0" className="w-full p-4 pr-10 border-2 border-slate-200 rounded-xl text-right font-black text-2xl text-green-700 focus:border-green-500 focus:ring-0 outline-none shadow-inner bg-slate-50 hover:bg-white transition-colors" onChange={(e) => handleInputChange(emp.id, e.target.value)} />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-lg font-black text-slate-300 pointer-events-none">d</span>
                 </div>
               </div>
             </div>
           ))}
           
           {employees.length === 0 && (
-             <div className="text-center py-8 text-slate-500 font-medium bg-slate-50 rounded-lg border border-slate-200">
+             <div className="text-center py-12 text-slate-500 font-medium bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
                Adicione funcionários na aba "Equipe" antes de calcular a folha.
              </div>
           )}
         </div>
 
+        {/* Mensagem de Erro Visual da Folha */}
+        {errorMsg && (
+          <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 font-bold flex items-center justify-center gap-2 animate-fade-in text-center">
+            <AlertCircle size={20} /> {errorMsg}
+          </div>
+        )}
+
         <div className="mt-8 pt-6 border-t border-slate-200 flex justify-end">
-          <button onClick={calculate} disabled={employees.length === 0} className="w-full md:w-auto bg-slate-800 text-white px-8 py-4 rounded-xl font-black text-lg shadow-lg hover:bg-slate-900 hover:shadow-xl transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+          <button onClick={calculate} disabled={employees.length === 0} className="w-full md:w-auto bg-slate-800 text-white px-10 py-5 rounded-2xl font-black text-lg shadow-[0_8px_30px_rgb(0,0,0,0.12)] hover:bg-slate-900 hover:shadow-xl hover:-translate-y-1 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed">
             <FileText size={24} /> Gerar Recibos (Holerites)
           </button>
         </div>
@@ -555,103 +716,122 @@ function PayrollCalculator({ employees, onGenerate }) {
   );
 }
 
-// 4. Visualização de Holerite e Impressão
-function HoleriteView({ data, onBack, companyName }) {
+function HoleriteView({ data, navigate, companyName }) {
+  
+  // Tratamento caso atualize a tela nos Holerites sem ter gerado os dados (volta pra folha)
+  useEffect(() => {
+    if (!data || !data.items) {
+      navigate('/gerar-folha');
+    }
+  }, [data, navigate]);
+
+  if (!data || !data.items) return null; // Previne quebra de tela rápida
+
   const handlePrint = () => window.print();
   const formatCurrency = (val) => Number(val).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  
   const [ano, mes] = data.period.split('-');
   const dataFormatada = new Date(ano, mes - 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-center print:hidden bg-white p-4 rounded-xl shadow-md border border-slate-200 sticky top-4 z-10 gap-4">
-        <button onClick={onBack} className="w-full md:w-auto flex items-center justify-center gap-2 text-slate-600 hover:text-blue-600 font-bold transition px-4 py-2 rounded-lg hover:bg-slate-100 border border-transparent hover:border-slate-300">
-          <ArrowLeft size={20} /> Voltar e Editar
+      <div className="flex flex-col md:flex-row justify-between items-center print:hidden bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200 sticky top-20 z-10 gap-4">
+        <button onClick={() => navigate('/gerar-folha')} className="w-full md:w-auto flex items-center justify-center gap-2 text-slate-600 hover:text-blue-700 font-bold transition px-6 py-3 rounded-xl hover:bg-blue-50 border border-slate-200 hover:border-blue-200">
+          <ArrowLeft size={20} /> Voltar para a Folha
         </button>
-        <button onClick={handlePrint} className="w-full md:w-auto bg-blue-700 text-white px-8 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-blue-800 font-black shadow-lg">
-          <Printer size={20} /> Imprimir Recibos PDF
+        <button onClick={handlePrint} className="w-full md:w-auto bg-blue-700 text-white px-10 py-3 rounded-xl flex items-center justify-center gap-2 hover:bg-blue-800 font-black shadow-lg hover:shadow-xl transition-all hover:-translate-y-0.5">
+          <Printer size={20} /> Imprimir Recibos Oficiais
         </button>
       </div>
 
-      <div className="print:w-full print:absolute print:top-0 print:left-0 print:bg-white">
+      <div className="print:w-full print:absolute print:top-0 print:left-0 print:bg-white print:p-0">
         {data.items.map((item, index) => (
-          <div key={index} className="bg-white p-8 mb-8 border-2 border-slate-800 rounded-none max-w-3xl mx-auto print:break-inside-avoid print:mb-20 print:border-2 shadow-xl print:shadow-none relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-slate-100 -rotate-45 transform origin-top-right print:hidden opacity-50 pointer-events-none"></div>
+          <div key={index} className="bg-white p-8 md:p-10 mb-8 border-2 border-slate-800 rounded-none max-w-4xl mx-auto print:break-inside-avoid print:mb-20 print:border-2 shadow-2xl print:shadow-none relative overflow-hidden">
+            {/* Elemento Visual Decorativo (Não sai na impressão se bem configurado, mas dá charme no painel) */}
+            <div className="absolute top-0 right-0 w-40 h-40 bg-slate-100 -rotate-45 transform origin-top-right print:hidden opacity-50 pointer-events-none"></div>
             
             {/* Header Holerite */}
-            <div className="border-b-4 border-slate-800 pb-4 mb-6 flex justify-between items-start relative z-10">
+            <div className="border-b-4 border-slate-800 pb-6 mb-8 flex flex-col md:flex-row justify-between items-start md:items-end relative z-10 gap-4">
               <div>
-                <h1 className="text-3xl font-black uppercase tracking-wider text-slate-900">Recibo de Pagamento</h1>
-                <p className="text-md font-bold text-slate-600 uppercase mt-1 bg-slate-200 inline-block px-3 py-1 rounded-sm">Ref: {dataFormatada}</p>
+                <h1 className="text-3xl md:text-4xl font-black uppercase tracking-widest text-slate-900 leading-none">Recibo de Pagamento</h1>
+                <p className="text-sm font-black text-slate-600 uppercase mt-3 bg-slate-200 inline-block px-4 py-1.5 rounded-sm tracking-widest">Referência: {dataFormatada}</p>
               </div>
-              <div className="text-right">
-                <p className="font-black text-2xl text-slate-800">{companyName || "Empresa"}</p>
-                <p className="text-sm font-bold text-slate-500 uppercase tracking-widest mt-1">RH / Administrativo</p>
+              <div className="text-left md:text-right w-full md:w-auto border-t-2 border-slate-200 md:border-none pt-4 md:pt-0">
+                <p className="font-black text-2xl text-slate-900 uppercase">{companyName}</p>
+                <p className="text-xs font-black text-slate-500 uppercase tracking-widest mt-1">Recursos Humanos / Administrativo</p>
               </div>
             </div>
 
             {/* Dados Funcionario */}
-            <div className="grid grid-cols-2 gap-4 mb-6 bg-slate-100 p-4 rounded-lg border border-slate-300 print:bg-transparent print:border-2 print:border-slate-800 print:rounded-none">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8 bg-slate-50 p-6 rounded-lg border-2 border-slate-300 print:bg-transparent print:border-2 print:border-slate-800 print:rounded-none">
               <div>
-                <span className="block text-xs font-black text-slate-500 uppercase tracking-wider">Nome do Colaborador</span>
-                <span className="text-xl font-bold text-slate-900">{item.name}</span>
+                <span className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Nome do Colaborador</span>
+                <span className="text-xl md:text-2xl font-black text-slate-900 uppercase">{item.name}</span>
               </div>
               <div>
-                <span className="block text-xs font-black text-slate-500 uppercase tracking-wider">Cargo / Função</span>
-                <span className="text-xl font-bold text-slate-900">{item.role}</span>
+                <span className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Cargo / Função Exercida</span>
+                <span className="text-xl md:text-2xl font-black text-slate-900 uppercase">{item.role}</span>
               </div>
             </div>
 
-            <table className="w-full mb-8 border-collapse border-2 border-slate-800">
+            {/* Tabela Principal */}
+            <table className="w-full mb-10 border-collapse border-2 border-slate-800">
               <thead>
-                <tr className="bg-slate-200 border-b-2 border-slate-800 print:bg-transparent">
-                  <th className="text-left py-3 px-4 uppercase text-xs font-black tracking-wider border-r border-slate-400">Descrição</th>
-                  <th className="text-center py-3 px-4 uppercase text-xs font-black tracking-wider border-r border-slate-400">Ref.</th>
-                  <th className="text-right py-3 px-4 uppercase text-xs font-black tracking-wider border-r border-slate-400">Vencimentos</th>
-                  <th className="text-right py-3 px-4 uppercase text-xs font-black tracking-wider">Descontos</th>
+                <tr className="bg-slate-200 border-b-4 border-slate-800 print:bg-transparent print:border-b-2">
+                  <th className="text-left py-4 px-4 md:px-6 uppercase text-[11px] font-black tracking-widest border-r-2 border-slate-400">Descrição do Lançamento</th>
+                  <th className="text-center py-4 px-2 md:px-4 uppercase text-[11px] font-black tracking-widest border-r-2 border-slate-400">Ref.</th>
+                  <th className="text-right py-4 px-4 md:px-6 uppercase text-[11px] font-black tracking-widest border-r-2 border-slate-400 w-32 md:w-48">Vencimentos</th>
+                  <th className="text-right py-4 px-4 md:px-6 uppercase text-[11px] font-black tracking-widest w-32 md:w-48">Descontos</th>
                 </tr>
               </thead>
               <tbody>
-                <tr className="border-b border-slate-200">
-                  <td className="py-4 px-4 text-sm font-medium border-r border-slate-300">{item.description}</td>
-                  <td className="text-center text-sm font-bold border-r border-slate-300">{item.daysWorked}d</td>
-                  <td className="text-right text-sm font-mono font-bold border-r border-slate-300 text-green-700">{formatCurrency(item.totalReceive)}</td>
-                  <td className="text-right text-sm font-mono text-slate-400">0,00</td>
+                <tr className="border-b border-slate-300 print:border-slate-800">
+                  <td className="py-5 px-4 md:px-6 text-sm md:text-base font-bold text-slate-800 border-r-2 border-slate-300 print:border-slate-800">{item.description}</td>
+                  <td className="text-center text-sm md:text-base font-black border-r-2 border-slate-300 print:border-slate-800 bg-slate-50 print:bg-transparent">{item.daysWorked}d</td>
+                  <td className="text-right text-sm md:text-base font-mono font-black border-r-2 border-slate-300 print:border-slate-800">{formatCurrency(item.totalReceive)}</td>
+                  <td className="text-right text-sm md:text-base font-mono text-slate-400 font-bold">0,00</td>
                 </tr>
-                <tr className="h-24"><td className="border-r border-slate-300"></td><td className="border-r border-slate-300"></td><td className="border-r border-slate-300"></td><td></td></tr>
+                {/* Espaço em branco para formatação clássica de holerite */}
+                <tr className="h-32 md:h-48">
+                  <td className="border-r-2 border-slate-300 print:border-slate-800"></td>
+                  <td className="border-r-2 border-slate-300 print:border-slate-800 bg-slate-50 print:bg-transparent"></td>
+                  <td className="border-r-2 border-slate-300 print:border-slate-800"></td>
+                  <td></td>
+                </tr>
               </tbody>
               <tfoot>
-                <tr className="border-t-2 border-slate-800">
-                  <td colSpan="2" className="py-4 px-4 bg-slate-50 print:bg-transparent border-r-2 border-slate-800">
-                     <p className="text-xs uppercase font-black text-slate-500">Base {item.type === 'mensalista' ? 'Mensal' : 'Diária'}</p>
-                     <p className="font-mono font-bold">{formatCurrency(item.baseValue)}</p>
+                <tr className="border-t-4 border-slate-800 print:border-t-2">
+                  <td colSpan="2" className="py-4 px-6 bg-slate-100 print:bg-transparent border-r-4 border-slate-800 print:border-r-2">
+                     <p className="text-[10px] uppercase font-black text-slate-500 tracking-widest">Base de Cálculo {item.type === 'mensalista' ? 'Mensal' : 'Diária'}</p>
+                     <p className="font-mono font-black text-lg">{formatCurrency(item.baseValue)}</p>
                   </td>
-                  <td colSpan="2" className="py-4 px-4 bg-slate-800 text-white print:bg-transparent print:text-black">
-                    <div className="flex justify-between items-center">
-                      <span className="uppercase text-sm font-black">Líquido a Pagar</span>
-                      <span className="text-2xl font-mono font-black">{formatCurrency(item.totalReceive)}</span>
+                  <td colSpan="2" className="py-4 px-6 bg-slate-900 text-white print:bg-transparent print:text-black">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
+                      <span className="uppercase text-xs font-black tracking-widest mb-1 md:mb-0">Líquido a Pagar</span>
+                      <span className="text-2xl md:text-3xl font-mono font-black leading-none">{formatCurrency(item.totalReceive)}</span>
                     </div>
                   </td>
                 </tr>
               </tfoot>
             </table>
 
-            <div className="mt-20 pt-2 flex justify-between items-end px-4">
-              <div className="text-center w-5/12">
-                <div className="border-t-2 border-slate-800 pt-2"></div>
-                <p className="text-xs font-black uppercase text-slate-600">Assinatura do Empregador</p>
+            {/* Áreas de Assinatura */}
+            <div className="mt-24 pt-4 flex flex-col md:flex-row justify-between items-end px-4 gap-12 md:gap-4">
+              <div className="text-center w-full md:w-5/12">
+                <div className="border-t-2 border-slate-800 pt-3"></div>
+                <p className="text-[11px] font-black uppercase text-slate-800 tracking-widest">Assinatura do Empregador</p>
               </div>
-              <div className="text-center text-xs font-bold text-slate-400 pb-2">
+              <div className="text-center text-xs font-black text-slate-500 uppercase tracking-widest pb-4 md:pb-2 whitespace-nowrap">
                 Data: ___/___/20___
               </div>
-              <div className="text-center w-5/12">
-                <div className="border-t-2 border-slate-800 pt-2"></div>
-                <p className="text-xs font-black uppercase text-slate-600">Assinatura do Colaborador</p>
+              <div className="text-center w-full md:w-5/12">
+                <div className="border-t-2 border-slate-800 pt-3"></div>
+                <p className="text-[11px] font-black uppercase text-slate-800 tracking-widest">Assinatura do Colaborador</p>
               </div>
             </div>
             
-            <div className="mt-8 text-center border-t border-dashed border-slate-300 pt-3">
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Documento Auxiliar de RH gerado via RH Fácil SaaS</p>
+            <div className="mt-12 text-center border-t-2 border-dashed border-slate-300 pt-4">
+              <p className="text-[9px] text-slate-400 font-black uppercase tracking-[0.2em]">Documento Auxiliar de RH - Processado Eletronicamente via RH Fast SaaS</p>
             </div>
           </div>
         ))}
