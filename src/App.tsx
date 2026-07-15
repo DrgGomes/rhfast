@@ -1,7 +1,7 @@
 // @ts-nocheck
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, addDoc, onSnapshot, updateDoc, doc, deleteDoc, query, orderBy } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, onSnapshot, updateDoc, doc, setDoc, getDoc, deleteDoc, query, orderBy } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 
 // --- CONFIGURAÇÃO FIREBASE ---
@@ -23,11 +23,20 @@ const auth = getAuth(app);
 export default function App() {
   const [user, setUser] = useState(null);
   const [page, setPage] = useState('landing'); 
+  const [companyProfile, setCompanyProfile] = useState({ name: 'Sua Empresa', cnpj: '', logo: '' });
 
   useEffect(() => {
-    onAuthStateChanged(auth, (u) => { 
+    onAuthStateChanged(auth, async (u) => { 
       setUser(u); 
-      if(u) setPage('dashboard'); 
+      if(u) {
+          // Puxa as configurações da empresa ao logar
+          const docRef = doc(db, 'companies', u.uid, 'settings', 'profile');
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+              setCompanyProfile(docSnap.data());
+          }
+          setPage('dashboard'); 
+      }
     });
   }, []);
 
@@ -39,11 +48,15 @@ export default function App() {
     <div className="min-h-screen bg-[#f4f7fb] flex flex-col font-sans w-full">
       <nav className="bg-[#303863] text-white flex justify-between items-center shadow-md w-full px-8 py-3 print:hidden">
         <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setPage('dashboard')}>
-            <div className="w-10 h-10 bg-white rounded flex items-center justify-center">
-                <span className="text-[#303863] font-black text-xl leading-none">RH</span>
+            <div className="w-10 h-10 bg-white rounded flex items-center justify-center overflow-hidden">
+                {companyProfile.logo ? (
+                    <img src={companyProfile.logo} alt="Logo" className="w-full h-full object-cover" />
+                ) : (
+                    <span className="text-[#303863] font-black text-xl leading-none">RH</span>
+                )}
             </div>
             <div>
-                <h1 className="font-bold text-lg leading-tight">Sistema de Gestão</h1>
+                <h1 className="font-bold text-lg leading-tight truncate max-w-[200px]">{companyProfile.name}</h1>
                 <p className="text-xs text-blue-300">Empresa Conectada</p>
             </div>
         </div>
@@ -52,22 +65,25 @@ export default function App() {
           <MenuBtn active={page === 'dashboard'} onClick={() => setPage('dashboard')}>Início</MenuBtn>
           <MenuBtn active={page === 'employees'} onClick={() => setPage('employees')}>Equipe</MenuBtn>
           <MenuBtn active={page === 'payroll'} onClick={() => setPage('payroll')}>Calcular</MenuBtn>
-          <MenuBtn active={page === 'history'} onClick={() => setPage('history')}>Histórico / Relatórios</MenuBtn>
+          <MenuBtn active={page === 'history'} onClick={() => setPage('history')}>Relatórios</MenuBtn>
           <MenuBtn active={page === 'docs'} onClick={() => setPage('docs')}>Documentos</MenuBtn>
         </div>
 
         <div className="flex items-center space-x-4">
-            <button className="hover:text-blue-200">⚙️ Configurações</button>
+            <button onClick={() => setPage('settings')} className={`flex items-center space-x-1 ${page === 'settings' ? 'text-white' : 'text-blue-200 hover:text-white'}`}>
+                <span>⚙️</span><span>Configurações</span>
+            </button>
             <button onClick={() => signOut(auth)} className="text-red-400 hover:text-red-300 flex items-center">Sair 🚪</button>
         </div>
       </nav>
 
       <main className="p-8 print:p-0 flex-grow w-full max-w-7xl mx-auto print:max-w-none">
         {page === 'dashboard' && <Dashboard uid={user.uid} onNavigate={setPage} />}
-        {page === 'employees' && <EmployeeManager uid={user.uid} />}
+        {page === 'employees' && <EmployeeManager uid={user.uid} companyProfile={companyProfile} />}
         {page === 'payroll' && <PayrollCalculator uid={user.uid} />}
-        {page === 'history' && <PaymentHistory uid={user.uid} />}
-        {page === 'docs' && <DocumentGenerator uid={user.uid} />}
+        {page === 'history' && <PaymentHistory uid={user.uid} companyProfile={companyProfile} />}
+        {page === 'docs' && <DocumentGenerator uid={user.uid} companyProfile={companyProfile} />}
+        {page === 'settings' && <Settings uid={user.uid} currentProfile={companyProfile} onUpdate={setCompanyProfile} />}
       </main>
     </div>
   );
@@ -81,8 +97,53 @@ function MenuBtn({ children, active, onClick }) {
     );
 }
 
-// --- MÓDULOS (DASHBOARD, EQUIPE, CÁLCULO MANTIDOS IGUAIS) ---
+// --- MÓDULO DE CONFIGURAÇÕES (NOVO) ---
+function Settings({ uid, currentProfile, onUpdate }) {
+    const [profile, setProfile] = useState(currentProfile);
 
+    const handleSave = async () => {
+        try {
+            await setDoc(doc(db, 'companies', uid, 'settings', 'profile'), profile);
+            onUpdate(profile);
+            alert("Configurações atualizadas com sucesso!");
+        } catch (error) {
+            alert("Erro ao salvar: " + error.message);
+        }
+    };
+
+    return (
+        <div className="w-full animation-fade-in max-w-3xl mx-auto">
+            <div className="flex items-center space-x-3 mb-8">
+                <span className="text-3xl bg-gray-200 text-gray-700 p-2 rounded-lg">⚙️</span>
+                <div><h2 className="text-3xl font-bold text-[#2a3052]">Configurações da Empresa</h2><p className="text-gray-500">Dados que sairão nos holerites e recibos.</p></div>
+            </div>
+
+            <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-200 space-y-6">
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Nome da Empresa (Razão Social ou Fantasia)</label>
+                    <input className="w-full border p-3 rounded-lg outline-none focus:ring-2 focus:ring-blue-300" value={profile.name} onChange={e => setProfile({...profile, name: e.target.value})} placeholder="Ex: Indústria XYZ Ltda" />
+                </div>
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">CNPJ</label>
+                    <input className="w-full border p-3 rounded-lg outline-none focus:ring-2 focus:ring-blue-300" value={profile.cnpj} onChange={e => setProfile({...profile, cnpj: e.target.value})} placeholder="00.000.000/0000-00" />
+                </div>
+                <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">URL da Logomarca (Opcional)</label>
+                    <input className="w-full border p-3 rounded-lg outline-none focus:ring-2 focus:ring-blue-300" value={profile.logo} onChange={e => setProfile({...profile, logo: e.target.value})} placeholder="Cole o link da imagem da sua logo" />
+                    <p className="text-xs text-gray-400 mt-1">Insira um link de imagem (PNG/JPG) para aparecer no sistema e impressões.</p>
+                </div>
+                
+                <div className="pt-4 border-t border-gray-100 flex justify-end">
+                    <button onClick={handleSave} className="bg-blue-600 text-white px-8 py-3 rounded-lg font-bold shadow hover:bg-blue-700 transition">
+                        Salvar Configurações
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// --- DASHBOARD ---
 function Dashboard({ uid, onNavigate }) { 
     const [employeeCount, setEmployeeCount] = useState(0);
     const [employees, setEmployees] = useState([]);
@@ -138,7 +199,7 @@ function Dashboard({ uid, onNavigate }) {
                     <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col">
                         <div className="p-6 border-b flex items-center space-x-2"><span className="bg-orange-100 text-orange-600 p-2 rounded-md">💸</span><h2 className="text-xl font-bold text-[#2a3052]">Novo Vale</h2></div>
                         <div className="p-6 space-y-4">
-                            <div><label className="text-xs font-bold text-gray-500 uppercase">Funcionário</label><select className="w-full border p-3 rounded-lg outline-none focus:ring-2 focus:ring-blue-300 bg-white" value={vale.employeeId} onChange={e => setVale({...vale, employeeId: e.target.value})}><option value="">Selecione...</option>{employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}</select></div>
+                            <div><label className="text-xs font-bold text-gray-500 uppercase">Funcionário</label><select className="w-full border p-3 rounded-lg outline-none bg-white" value={vale.employeeId} onChange={e => setVale({...vale, employeeId: e.target.value})}><option value="">Selecione...</option>{employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}</select></div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div><label className="text-xs font-bold text-gray-500 uppercase">Valor (R$)</label><input type="number" className="w-full border p-3 rounded-lg outline-none" value={vale.amount} onChange={e => setVale({...vale, amount: e.target.value})} /></div>
                                 <div><label className="text-xs font-bold text-gray-500 uppercase">Mês Ref.</label><input type="month" className="w-full border p-3 rounded-lg outline-none" value={vale.date} onChange={e => setVale({...vale, date: e.target.value})} /></div>
@@ -146,7 +207,7 @@ function Dashboard({ uid, onNavigate }) {
                             <div><label className="text-xs font-bold text-gray-500 uppercase">Motivo</label><input placeholder="Ex: Adiantamento" className="w-full border p-3 rounded-lg outline-none" value={vale.reason} onChange={e => setVale({...vale, reason: e.target.value})} /></div>
                         </div>
                         <div className="p-4 border-t bg-gray-50 flex justify-end space-x-3">
-                            <button onClick={() => setShowValeModal(false)} className="px-6 py-2 text-gray-600 hover:bg-gray-200 rounded-lg font-medium border border-gray-300 bg-white">Cancelar</button>
+                            <button onClick={() => setShowValeModal(false)} className="px-6 py-2 text-gray-600 hover:bg-gray-200 rounded-lg font-medium bg-white">Cancelar</button>
                             <button onClick={handleLancarVale} className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shadow">Salvar Lançamento</button>
                         </div>
                     </div>
@@ -156,6 +217,7 @@ function Dashboard({ uid, onNavigate }) {
     ); 
 }
 
+// --- EQUIPE ---
 function EmployeeManager({ uid }) {
   const [employees, setEmployees] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -169,6 +231,13 @@ function EmployeeManager({ uid }) {
   }, [uid]);
 
   const handleSave = async () => {
+      // Bloqueio de Plano Grátis (Exemplo Lógico)
+      if (!editId && employees.length >= 4) {
+          // Aqui no futuro checaríamos o plano no Firebase. Por hora, como é MVP, vou deixar liberar, 
+          // mas você pode travar descomentando a linha abaixo:
+          // return alert("Seu Plano Grátis atingiu o limite de 4 funcionários. Faça o upgrade para adicionar mais.");
+      }
+
       if (!empForm.name || !empForm.rate) return alert("Preencha Nome e Valor.");
       try {
           const dataToSave = { ...empForm, rate: parseFloat(empForm.rate) };
@@ -195,7 +264,7 @@ function EmployeeManager({ uid }) {
               return (
               <div key={emp.id} className="bg-white rounded-xl shadow p-6 border-t-4 border-blue-500 relative flex flex-col justify-between">
                   <div>
-                      {meses >= 11 && <div className="absolute top-4 right-4 bg-red-100 text-red-700 text-xs font-bold px-2 py-1 rounded animate-pulse">🚨 Férias Vencendo ({meses} meses)</div>}
+                      {meses >= 11 && <div className="absolute top-4 right-4 bg-red-100 text-red-700 text-xs font-bold px-2 py-1 rounded animate-pulse">🚨 Férias ({meses} meses)</div>}
                       <div className="text-xs font-bold text-blue-500 mb-2 uppercase">{emp.role || 'Sem cargo'}</div><h3 className="font-bold text-lg text-gray-800 mb-1">{emp.name}</h3><p className="text-xs text-gray-500 mb-4">{emp.type}</p>
                   </div>
                   <div className="flex justify-between items-end mt-6">
@@ -221,6 +290,7 @@ function EmployeeManager({ uid }) {
   );
 }
 
+// --- CÁLCULO ---
 function PayrollCalculator({ uid }) {
   const [employees, setEmployees] = useState([]);
   const [vales, setVales] = useState([]);
@@ -257,7 +327,7 @@ function PayrollCalculator({ uid }) {
           };
           await addDoc(collection(db, 'companies', uid, 'history'), folha);
           for (const v of vales) await updateDoc(doc(db, 'companies', uid, 'vales', v.id), { status: 'pago' });
-          alert("Folha fechada! Verifique a aba Histórico."); setInputs({}); 
+          alert("Folha fechada! Verifique a aba Relatórios."); setInputs({}); 
       } catch(e) { alert("Erro: " + e.message); }
   };
 
@@ -294,11 +364,11 @@ function PayrollCalculator({ uid }) {
   );
 }
 
-// --- NOVO: HISTÓRICO, RELATÓRIOS (NOVO VISUAL) E HOLERITES ---
-function PaymentHistory({ uid }) {
+// --- HISTÓRICO, RELATÓRIOS E HOLERITES (Com Dados da Empresa) ---
+function PaymentHistory({ uid, companyProfile }) {
     const [history, setHistory] = useState([]);
     const [selectedFolha, setSelectedFolha] = useState(null);
-    const [viewMode, setViewMode] = useState('list'); // 'list', 'report', 'holerites'
+    const [viewMode, setViewMode] = useState('list'); 
 
     useEffect(() => {
         const q = query(collection(db, 'companies', uid, 'history'), orderBy('createdAt', 'desc'));
@@ -308,70 +378,39 @@ function PaymentHistory({ uid }) {
 
     const handleCopyPix = (folha) => {
         let text = `*Pagamentos Folha (${formatDate(folha.periodStart)} a ${formatDate(folha.periodEnd)})*\n\n`;
-        folha.details.forEach(d => {
-            if(d.net > 0) text += `${d.name} \nPIX: ${d.pix || 'Não Cadastrado'} \nVALOR: R$ ${d.net.toFixed(2).replace('.',',')}\n---\n`;
-        });
-        navigator.clipboard.writeText(text);
-        alert("Lista de PIX copiada para a área de transferência! Cole no seu WhatsApp ou Banco.");
+        folha.details.forEach(d => { if(d.net > 0) text += `${d.name} \nPIX: ${d.pix || 'Não Cadastrado'} \nVALOR: R$ ${d.net.toFixed(2).replace('.',',')}\n---\n`; });
+        navigator.clipboard.writeText(text); alert("Lista de PIX copiada!");
     };
 
-    const formatDate = (dateStr) => {
-        if(!dateStr) return '';
-        const [y,m,d] = dateStr.split('-');
-        return `${d}/${m}/${y}`;
-    };
+    const formatDate = (dateStr) => { if(!dateStr) return ''; const [y,m,d] = dateStr.split('-'); return `${d}/${m}/${y}`; };
+    const openReport = (folha) => { setSelectedFolha(folha); setViewMode('report'); };
 
-    const openReport = (folha) => {
-        setSelectedFolha(folha);
-        setViewMode('report');
-    };
-
-    // VISÃO 1: RELATÓRIO GERENCIAL DE PAGAMENTOS (BASEADO NA IMAGEM)
     if (viewMode === 'report' && selectedFolha) {
         return (
             <div className="w-full animation-fade-in print:m-0 print:p-0">
-                {/* Top Action Bar */}
                 <div className="flex justify-between items-center mb-6 print:hidden">
-                    <button onClick={() => setViewMode('list')} className="text-gray-500 hover:text-blue-600 font-bold flex items-center">
-                        ← Voltar para Histórico
-                    </button>
+                    <button onClick={() => setViewMode('list')} className="text-gray-500 hover:text-blue-600 font-bold flex items-center">← Voltar para Histórico</button>
                     <div className="flex space-x-4">
-                        <button onClick={() => window.print()} className="bg-white border border-gray-300 text-gray-700 px-6 py-2 rounded-lg font-bold shadow-sm hover:bg-gray-50 flex items-center space-x-2">
-                            <span>🖨️ Imprimir Relatório</span>
-                        </button>
-                        <button onClick={() => setViewMode('holerites')} className="bg-[#4a55e8] text-white px-6 py-2 rounded-lg font-bold shadow-md hover:bg-blue-700 flex items-center space-x-2">
-                            <span>Ver Holerites ➔</span>
-                        </button>
+                        <button onClick={() => window.print()} className="bg-white border border-gray-300 text-gray-700 px-6 py-2 rounded-lg font-bold shadow-sm hover:bg-gray-50">🖨️ Imprimir Relatório</button>
+                        <button onClick={() => setViewMode('holerites')} className="bg-[#4a55e8] text-white px-6 py-2 rounded-lg font-bold shadow-md hover:bg-blue-700">Ver Holerites ➔</button>
                     </div>
                 </div>
-
-                {/* Report Container */}
-                <div className="bg-white shadow-lg rounded-xl overflow-hidden border border-gray-200">
-                    {/* Header */}
-                    <div className="bg-[#1e233b] text-white p-8 flex justify-between items-center">
+                <div className="bg-white shadow-lg rounded-xl overflow-hidden border border-gray-200 print:shadow-none print:border-none">
+                    <div className="bg-[#1e233b] text-white p-8 flex justify-between items-center print:bg-white print:text-black print:border-b-2 print:border-black">
                         <div>
-                            <h2 className="text-2xl font-black uppercase tracking-wider mb-1">SUA EMPRESA - RELATÓRIO</h2>
-                            <p className="text-gray-400 text-sm">Relatório Gerencial de Pagamentos</p>
+                            <h2 className="text-2xl font-black uppercase tracking-wider mb-1">{companyProfile.name}</h2>
+                            <p className="text-gray-400 text-sm print:text-black">Relatório Gerencial de Pagamentos {companyProfile.cnpj ? ` - CNPJ: ${companyProfile.cnpj}` : ''}</p>
                         </div>
                         <div className="text-right">
-                            <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Período</p>
+                            <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1 print:text-black">Período</p>
                             <p className="text-xl font-bold">{formatDate(selectedFolha.periodStart)} - {formatDate(selectedFolha.periodEnd)}</p>
                         </div>
                     </div>
-
-                    {/* Table */}
                     <div className="overflow-x-auto">
                         <table className="w-full text-left border-collapse text-sm">
                             <thead>
                                 <tr className="bg-gray-50 text-gray-500 text-xs uppercase border-b border-gray-200">
-                                    <th className="p-4 font-bold">Colaborador</th>
-                                    <th className="p-4 text-center font-bold">Dias</th>
-                                    <th className="p-4 font-bold">Base</th>
-                                    <th className="p-4 font-bold">Bruto</th>
-                                    <th className="p-4 text-red-500 font-bold">Desc.</th>
-                                    <th className="p-4 text-blue-500 font-bold">Extra/Bônus</th>
-                                    <th className="p-4 font-bold">Líquido</th>
-                                    <th className="p-4 font-bold">PIX</th>
+                                    <th className="p-4 font-bold">Colaborador</th><th className="p-4 text-center font-bold">Dias</th><th className="p-4 font-bold">Base</th><th className="p-4 font-bold">Bruto</th><th className="p-4 text-red-500 font-bold">Desc.</th><th className="p-4 text-blue-500 font-bold">Extra/Bônus</th><th className="p-4 font-bold">Líquido</th><th className="p-4 font-bold">PIX</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -380,15 +419,8 @@ function PaymentHistory({ uid }) {
                                     const descontos = parseFloat(emp.faltas || 0) + parseFloat(emp.vales || 0);
                                     return (
                                         <tr key={idx} className="border-b hover:bg-gray-50">
-                                            <td className="p-4">
-                                                <p className="font-bold text-gray-800">{emp.name}</p>
-                                                <p className="text-xs text-gray-400 uppercase">{emp.role || 'Geral'}</p>
-                                            </td>
-                                            <td className="p-4 text-center">
-                                                <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full">
-                                                    {emp.type === 'Diarista' ? 'D' : 'M'}
-                                                </span>
-                                            </td>
+                                            <td className="p-4"><p className="font-bold text-gray-800">{emp.name}</p><p className="text-xs text-gray-400 uppercase">{emp.role || 'Geral'}</p></td>
+                                            <td className="p-4 text-center"><span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full print:border">{emp.type === 'Diarista' ? 'D' : 'M'}</span></td>
                                             <td className="p-4 text-gray-600">R$ {parseFloat(emp.rate).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
                                             <td className="p-4 font-bold text-gray-800">R$ {parseFloat(bruto).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
                                             <td className="p-4 text-red-500 font-bold">{descontos > 0 ? `(R$ ${parseFloat(descontos).toLocaleString('pt-BR', {minimumFractionDigits:2})})` : '-'}</td>
@@ -401,10 +433,8 @@ function PaymentHistory({ uid }) {
                             </tbody>
                         </table>
                     </div>
-
-                    {/* Footer */}
-                    <div className="bg-[#2a3052] text-white p-6 flex justify-end items-center space-x-6">
-                        <p className="font-bold uppercase tracking-wider text-sm text-gray-300">Total Geral da Folha:</p>
+                    <div className="bg-[#2a3052] text-white p-6 flex justify-end items-center space-x-6 print:bg-white print:text-black print:border-t-2 print:border-black">
+                        <p className="font-bold uppercase tracking-wider text-sm text-gray-300 print:text-black">Total Geral da Folha:</p>
                         <p className="text-3xl font-black">R$ {selectedFolha.totalGeral.toLocaleString('pt-BR', {minimumFractionDigits:2})}</p>
                     </div>
                 </div>
@@ -412,52 +442,40 @@ function PaymentHistory({ uid }) {
         );
     }
 
-    // VISÃO 2: HOLERITES (PARA IMPRESSÃO INDIVIDUAL)
     if (viewMode === 'holerites' && selectedFolha) {
         return (
             <div className="w-full animation-fade-in print:m-0 print:p-0">
                 <div className="flex justify-between items-center mb-8 print:hidden">
                     <button onClick={() => setViewMode('report')} className="text-gray-500 hover:text-blue-600 font-bold">← Voltar para Relatório</button>
-                    <button onClick={() => window.print()} className="bg-blue-600 text-white px-6 py-2 rounded font-bold flex items-center space-x-2">
-                        <span>🖨️ Imprimir Holerites (PDF)</span>
-                    </button>
+                    <button onClick={() => window.print()} className="bg-blue-600 text-white px-6 py-2 rounded font-bold">🖨️ Imprimir Holerites</button>
                 </div>
-
                 <div className="print:block">
                     {selectedFolha.details.map((emp, idx) => (
                         <div key={idx} className="bg-white border-2 border-gray-300 p-8 mb-8 shadow-sm rounded break-inside-avoid print:shadow-none print:border-gray-800 print:mb-12 print:page-break-after-always">
                             <div className="flex justify-between items-start border-b-2 border-gray-800 pb-4 mb-4">
-                                <div><h2 className="text-xl font-black uppercase text-gray-900">Sua Empresa</h2><p className="text-xs text-gray-500">Recibo de Pagamento de Salário</p></div>
+                                <div className="flex items-center space-x-4">
+                                    {companyProfile.logo && <img src={companyProfile.logo} alt="Logo" className="h-12 w-12 object-contain" />}
+                                    <div><h2 className="text-xl font-black uppercase text-gray-900">{companyProfile.name}</h2><p className="text-xs text-gray-500">Recibo de Pagamento de Salário {companyProfile.cnpj ? ` - CNPJ: ${companyProfile.cnpj}` : ''}</p></div>
+                                </div>
                                 <div className="text-right"><p className="font-bold">Período Referência</p><p>{formatDate(selectedFolha.periodStart)} a {formatDate(selectedFolha.periodEnd)}</p></div>
                             </div>
-                            
                             <div className="flex justify-between border border-gray-300 p-3 mb-4 bg-gray-50">
                                 <div><p className="text-xs font-bold text-gray-500 uppercase">Funcionário</p><p className="font-bold text-gray-900">{emp.name}</p></div>
                                 <div><p className="text-xs font-bold text-gray-500 uppercase">Cargo</p><p className="font-bold text-gray-900">{emp.role || 'Geral'}</p></div>
                             </div>
-
                             <table className="w-full border-collapse border border-gray-300 mb-6 text-sm">
-                                <thead>
-                                    <tr className="bg-gray-100"><th className="border border-gray-300 p-2 text-left">Descrição</th><th className="border border-gray-300 p-2 text-center w-24">Qtd.</th><th className="border border-gray-300 p-2 text-right w-32 text-green-700">Vencimentos</th><th className="border border-gray-300 p-2 text-right w-32 text-red-700">Descontos</th></tr>
-                                </thead>
+                                <thead><tr className="bg-gray-100"><th className="border border-gray-300 p-2 text-left">Descrição</th><th className="border border-gray-300 p-2 text-center w-24">Qtd.</th><th className="border border-gray-300 p-2 text-right w-32 text-green-700">Vencimentos</th><th className="border border-gray-300 p-2 text-right w-32 text-red-700">Descontos</th></tr></thead>
                                 <tbody>
-                                    <tr>
-                                        <td className="border border-gray-300 p-2">Salário Base / Diárias</td>
-                                        <td className="border border-gray-300 p-2 text-center">{emp.type === 'Diarista' ? `${emp.dias} dias` : '1 mês'}</td>
-                                        <td className="border border-gray-300 p-2 text-right text-green-700">{(emp.type === 'Diarista' ? emp.dias * emp.rate : parseFloat(emp.rate)).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
-                                        <td className="border border-gray-300 p-2 text-right"></td>
-                                    </tr>
+                                    <tr><td className="border border-gray-300 p-2">Salário Base / Diárias</td><td className="border border-gray-300 p-2 text-center">{emp.type === 'Diarista' ? `${emp.dias} dias` : '1 mês'}</td><td className="border border-gray-300 p-2 text-right text-green-700">{(emp.type === 'Diarista' ? emp.dias * emp.rate : parseFloat(emp.rate)).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td><td className="border border-gray-300 p-2 text-right"></td></tr>
                                     {emp.extra > 0 && (<tr><td className="border border-gray-300 p-2">Horas Extras / Bônus</td><td className="border border-gray-300 p-2 text-center">-</td><td className="border border-gray-300 p-2 text-right text-green-700">{parseFloat(emp.extra).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td><td className="border border-gray-300 p-2 text-right"></td></tr>)}
                                     {emp.faltas > 0 && (<tr><td className="border border-gray-300 p-2">Faltas / Atrasos</td><td className="border border-gray-300 p-2 text-center">-</td><td className="border border-gray-300 p-2 text-right"></td><td className="border border-gray-300 p-2 text-right text-red-700">{parseFloat(emp.faltas).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td></tr>)}
                                     {emp.vales > 0 && (<tr><td className="border border-gray-300 p-2">Adiantamentos (Vales)</td><td className="border border-gray-300 p-2 text-center">-</td><td className="border border-gray-300 p-2 text-right"></td><td className="border border-gray-300 p-2 text-right text-red-700">{parseFloat(emp.vales).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td></tr>)}
                                 </tbody>
                             </table>
-
                             <div className="flex justify-between items-end">
                                 <div><p className="text-sm text-gray-500">Chave PIX: {emp.pix || 'Não cadastrada'}</p></div>
                                 <div className="border-2 border-gray-800 p-4 rounded text-center"><p className="text-sm font-bold uppercase text-gray-600">Total Líquido</p><p className="text-3xl font-black">R$ {emp.net.toLocaleString('pt-BR', {minimumFractionDigits:2})}</p></div>
                             </div>
-                            
                             <div className="mt-12 pt-8 border-t border-gray-300 text-center text-xs text-gray-500">
                                 <p className="mb-8">Declaro ter recebido a importância líquida discriminada neste recibo.</p>
                                 <div className="flex justify-around"><div className="w-1/3 border-t border-black pt-1">Data</div><div className="w-1/2 border-t border-black pt-1">Assinatura de {emp.name}</div></div>
@@ -469,114 +487,47 @@ function PaymentHistory({ uid }) {
         );
     }
 
-    // VISÃO PADRÃO: LISTA DE HISTÓRICO
     return (
         <div className="w-full animation-fade-in">
-            <div className="flex items-center space-x-3 mb-8">
-                <span className="text-3xl bg-purple-100 text-purple-600 p-2 rounded-lg">📊</span>
-                <h2 className="text-3xl font-bold text-[#2a3052]">Histórico e Relatórios</h2>
-            </div>
+            <div className="flex items-center space-x-3 mb-8"><span className="text-3xl bg-purple-100 text-purple-600 p-2 rounded-lg">📊</span><h2 className="text-3xl font-bold text-[#2a3052]">Histórico e Relatórios</h2></div>
             <div className="space-y-4">
                 {history.map(folha => (
                     <div key={folha.id} className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex justify-between items-center hover:shadow-md transition">
-                        <div className="flex items-center space-x-4">
-                            <div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-xl">✓</div>
-                            <div>
-                                <h3 className="font-bold text-lg text-gray-800">Folha Fechada</h3>
-                                <p className="text-sm text-gray-500">Ref: {formatDate(folha.periodStart)} a {formatDate(folha.periodEnd)} • {folha.details?.length || 0} funcionários</p>
-                            </div>
-                        </div>
+                        <div className="flex items-center space-x-4"><div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-xl">✓</div><div><h3 className="font-bold text-lg text-gray-800">Folha Fechada</h3><p className="text-sm text-gray-500">Ref: {formatDate(folha.periodStart)} a {formatDate(folha.periodEnd)} • {folha.details?.length || 0} funcionários</p></div></div>
                         <div className="flex items-center space-x-8">
-                            <div className="text-right">
-                                <p className="text-xs text-gray-400 font-bold">TOTAL PAGO</p>
-                                <p className="text-xl font-black text-[#2a3052]">R$ {folha.totalGeral.toLocaleString('pt-BR', {minimumFractionDigits:2})}</p>
-                            </div>
+                            <div className="text-right"><p className="text-xs text-gray-400 font-bold">TOTAL PAGO</p><p className="text-xl font-black text-[#2a3052]">R$ {folha.totalGeral.toLocaleString('pt-BR', {minimumFractionDigits:2})}</p></div>
                             <div className="flex space-x-2">
-                                <button onClick={() => handleCopyPix(folha)} className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg font-bold hover:bg-indigo-100 transition text-sm">
-                                    📋 PIX em Lote
-                                </button>
-                                <button onClick={() => openReport(folha)} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 transition text-sm shadow">
-                                    Abrir Relatório
-                                </button>
+                                <button onClick={() => handleCopyPix(folha)} className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg font-bold hover:bg-indigo-100 text-sm">📋 PIX em Lote</button>
+                                <button onClick={() => openReport(folha)} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 text-sm shadow">Abrir Relatório</button>
                             </div>
                         </div>
                     </div>
                 ))}
-                {history.length === 0 && <p className="text-center text-gray-500 py-10">Nenhuma folha fechada ainda.</p>}
             </div>
         </div>
     );
 }
 
-function DocumentGenerator({ uid }) {
+function DocumentGenerator({ uid, companyProfile }) {
     const [employees, setEmployees] = useState([]);
     const [selectedEmpId, setSelectedEmpId] = useState('');
     const [docType, setDocType] = useState('advertencia');
     const [showPreview, setShowPreview] = useState(false);
 
-    useEffect(() => {
-        const unsub = onSnapshot(query(collection(db, 'companies', uid, 'employees')), (snap) => setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-        return () => unsub();
-    }, [uid]);
-
-    const handleGenerate = () => {
-        if (!selectedEmpId) return alert("Selecione um funcionário.");
-        setShowPreview(true);
-    };
-
-    const getEmp = () => employees.find(e => e.id === selectedEmpId) || {};
-    const hoje = new Date().toLocaleDateString('pt-BR', { year: 'numeric', month: 'long', day: 'numeric' });
+    useEffect(() => { const unsub = onSnapshot(query(collection(db, 'companies', uid, 'employees')), (snap) => setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data() })))); return () => unsub(); }, [uid]);
 
     if (showPreview) {
-        const emp = getEmp();
+        const emp = employees.find(e => e.id === selectedEmpId) || {};
+        const hoje = new Date().toLocaleDateString('pt-BR', { year: 'numeric', month: 'long', day: 'numeric' });
         return (
             <div className="w-full animation-fade-in print:m-0 print:p-0">
-                <div className="mb-6 print:hidden flex justify-between">
-                    <button onClick={() => setShowPreview(false)} className="text-blue-600 font-bold">← Voltar</button>
-                    <button onClick={() => window.print()} className="bg-green-600 text-white px-6 py-2 rounded font-bold shadow">🖨️ Imprimir / Salvar PDF</button>
-                </div>
-                
+                <div className="mb-6 print:hidden flex justify-between"><button onClick={() => setShowPreview(false)} className="text-blue-600 font-bold">← Voltar</button><button onClick={() => window.print()} className="bg-green-600 text-white px-6 py-2 rounded font-bold shadow">🖨️ Imprimir PDF</button></div>
                 <div className="bg-white p-12 border shadow max-w-4xl mx-auto print:shadow-none print:border-none text-justify text-lg leading-relaxed">
-                    <div className="text-center mb-12 border-b-2 border-black pb-6">
-                        <h1 className="text-2xl font-black uppercase">Sua Empresa</h1>
-                        <p className="text-gray-600">Documento Oficial de Recursos Humanos</p>
-                    </div>
-
-                    {docType === 'advertencia' && (
-                        <div>
-                            <h2 className="text-xl font-bold text-center mb-8 uppercase">Advertência Disciplinar Escrita</h2>
-                            <p className="mb-4">Ao Sr(a). <strong>{emp.name}</strong>, portador(a) do CPF nº <strong>{emp.cpf || '___________'}</strong>, exercendo a função de <strong>{emp.role || '___________'}</strong>.</p>
-                            <p className="mb-8">Pelo presente termo, vimos aplicar-lhe a penalidade de ADVERTÊNCIA DISCIPLINAR, em razão de atos que infringem as normas internas da empresa, prejudicando o bom andamento dos serviços.</p>
-                            <p className="mb-8">Ressaltamos que a reincidência poderá acarretar sanções mais severas, incluindo a rescisão do contrato de trabalho por justa causa. Solicitamos que as normas estabelecidas sejam observadas rigorosamente a partir desta data.</p>
-                        </div>
-                    )}
-
-                    {docType === 'rescisao' && (
-                        <div>
-                            <h2 className="text-xl font-bold text-center mb-8 uppercase">Termo de Quitação de Contrato</h2>
-                            <p className="mb-4">Declaramos para os devidos fins que o Sr(a). <strong>{emp.name}</strong>, CPF nº <strong>{emp.cpf || '___________'}</strong>, teve seu contrato de trabalho (Função: <strong>{emp.role || '___________'}</strong>) rescindido na presente data.</p>
-                            <p className="mb-8">O presente termo serve como comprovante de quitação integral de todas as verbas rescisórias, diárias e direitos pendentes até o último dia trabalhado, não restando nenhum valor a ser pleiteado no futuro referente à prestação de serviços encerrada.</p>
-                        </div>
-                    )}
-
-                    {docType === 'epi' && (
-                        <div>
-                            <h2 className="text-xl font-bold text-center mb-8 uppercase">Recibo de Entrega de EPI / Uniforme</h2>
-                            <p className="mb-4">Eu, <strong>{emp.name}</strong>, CPF nº <strong>{emp.cpf || '___________'}</strong>, declaro ter recebido da empresa, de forma gratuita, os Equipamentos de Proteção Individual (EPI) e/ou uniformes para uso exclusivo na execução das minhas atividades.</p>
-                            <p className="mb-8">Comprometo-me a usá-los apenas para o fim a que se destinam, responsabilizando-me por sua guarda e conservação, e a devolvê-los ao término do meu contrato.</p>
-                            <div className="w-full h-32 border border-dashed border-gray-400 mb-8 p-4 text-gray-400">
-                                (Escreva aqui à caneta a descrição dos itens entregues, ex: 1 Bota nº 40, 2 Camisetas)
-                            </div>
-                        </div>
-                    )}
-
-                    <div className="mt-20 text-center">
-                        <p className="mb-12">Franca, SP - {hoje}</p>
-                        <div className="flex justify-around mt-16">
-                            <div className="w-1/3 border-t border-black pt-2 font-bold">A Empresa</div>
-                            <div className="w-1/2 border-t border-black pt-2 font-bold">Assinatura: {emp.name}</div>
-                        </div>
-                    </div>
+                    <div className="text-center mb-12 border-b-2 border-black pb-6"><h1 className="text-2xl font-black uppercase">{companyProfile.name}</h1><p className="text-gray-600">Documento Oficial de Recursos Humanos {companyProfile.cnpj ? ` - CNPJ: ${companyProfile.cnpj}` : ''}</p></div>
+                    {docType === 'advertencia' && (<div><h2 className="text-xl font-bold text-center mb-8 uppercase">Advertência Disciplinar Escrita</h2><p className="mb-4">Ao Sr(a). <strong>{emp.name}</strong>, portador(a) do CPF nº <strong>{emp.cpf || '___________'}</strong>, exercendo a função de <strong>{emp.role || '___________'}</strong>.</p><p className="mb-8">Pelo presente termo, vimos aplicar-lhe a penalidade de ADVERTÊNCIA DISCIPLINAR, em razão de atos que infringem as normas internas da empresa, prejudicando o bom andamento dos serviços.</p><p className="mb-8">Ressaltamos que a reincidência poderá acarretar sanções mais severas, incluindo a rescisão do contrato de trabalho por justa causa.</p></div>)}
+                    {docType === 'rescisao' && (<div><h2 className="text-xl font-bold text-center mb-8 uppercase">Termo de Quitação de Contrato</h2><p className="mb-4">Declaramos para os devidos fins que o Sr(a). <strong>{emp.name}</strong>, CPF nº <strong>{emp.cpf || '___________'}</strong>, teve seu contrato de trabalho (Função: <strong>{emp.role || '___________'}</strong>) rescindido na presente data.</p><p className="mb-8">O presente termo serve como comprovante de quitação integral de todas as verbas rescisórias, diárias e direitos pendentes até o último dia trabalhado.</p></div>)}
+                    {docType === 'epi' && (<div><h2 className="text-xl font-bold text-center mb-8 uppercase">Recibo de Entrega de EPI / Uniforme</h2><p className="mb-4">Eu, <strong>{emp.name}</strong>, CPF nº <strong>{emp.cpf || '___________'}</strong>, declaro ter recebido da empresa <strong>{companyProfile.name}</strong>, de forma gratuita, os Equipamentos de Proteção Individual (EPI) e/ou uniformes para uso exclusivo na execução das minhas atividades.</p><div className="w-full h-32 border border-dashed border-gray-400 mb-8 p-4 text-gray-400">(Escreva aqui à caneta a descrição dos itens entregues)</div></div>)}
+                    <div className="mt-20 text-center"><p className="mb-12">Data: ___/___/20___</p><div className="flex justify-around mt-16"><div className="w-1/3 border-t border-black pt-2 font-bold">{companyProfile.name}</div><div className="w-1/2 border-t border-black pt-2 font-bold">Assinatura: {emp.name}</div></div></div>
                 </div>
             </div>
         );
@@ -584,53 +535,94 @@ function DocumentGenerator({ uid }) {
 
     return (
         <div className="w-full animation-fade-in max-w-4xl mx-auto print:hidden">
-             <div className="flex items-center space-x-3 mb-8">
-                  <span className="text-3xl bg-orange-100 text-orange-600 p-2 rounded-lg">📄</span>
-                  <div><h2 className="text-3xl font-bold text-[#2a3052]">Gerador de Documentos</h2><p className="text-gray-500">Crie documentos oficiais em PDF com 1 clique.</p></div>
-              </div>
-
+             <div className="flex items-center space-x-3 mb-8"><span className="text-3xl bg-orange-100 text-orange-600 p-2 rounded-lg">📄</span><div><h2 className="text-3xl font-bold text-[#2a3052]">Gerador de Documentos</h2></div></div>
               <div className="bg-white p-8 rounded-xl shadow border border-gray-100">
-                  <div className="mb-6">
-                      <label className="block text-sm font-bold text-gray-700 mb-2">1. Selecione o Funcionário</label>
-                      <select className="w-full border border-gray-300 p-3 rounded-lg bg-white" value={selectedEmpId} onChange={e => setSelectedEmpId(e.target.value)}>
-                          <option value="">Selecione da lista...</option>
-                          {employees.map(e => <option key={e.id} value={e.id}>{e.name} - {e.role}</option>)}
-                      </select>
-                  </div>
-
-                  <div className="mb-8">
-                      <label className="block text-sm font-bold text-gray-700 mb-2">2. Tipo de Documento</label>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <div onClick={() => setDocType('advertencia')} className={`border p-4 rounded-xl cursor-pointer transition ${docType === 'advertencia' ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-200' : 'border-gray-200 hover:bg-gray-50'}`}>
-                              <span className="text-xl block mb-2">🛡️</span><h4 className="font-bold text-gray-900">Advertência Escrita</h4><p className="text-xs text-gray-500">Aviso disciplinar formal</p>
-                          </div>
-                          <div onClick={() => setDocType('rescisao')} className={`border p-4 rounded-xl cursor-pointer transition ${docType === 'rescisao' ? 'border-red-500 bg-red-50 ring-2 ring-red-200' : 'border-gray-200 hover:bg-gray-50'}`}>
-                              <span className="text-xl block mb-2">⚠️</span><h4 className="font-bold text-gray-900">Termo de Rescisão</h4><p className="text-xs text-gray-500">Quitação final do contrato</p>
-                          </div>
-                          <div onClick={() => setDocType('epi')} className={`border p-4 rounded-xl cursor-pointer transition ${docType === 'epi' ? 'border-green-500 bg-green-50 ring-2 ring-green-200' : 'border-gray-200 hover:bg-gray-50'}`}>
-                              <span className="text-xl block mb-2">🦺</span><h4 className="font-bold text-gray-900">Recibo de EPI</h4><p className="text-xs text-gray-500">Entrega de uniformes/botinas</p>
-                          </div>
-                      </div>
-                  </div>
-                  <button onClick={handleGenerate} className="w-full bg-blue-600 text-white font-bold text-lg py-4 rounded-lg shadow hover:bg-blue-700">Pré-visualizar Documento</button>
+                  <div className="mb-6"><label className="block text-sm font-bold text-gray-700 mb-2">1. Selecione o Funcionário</label><select className="w-full border p-3 rounded-lg bg-white" value={selectedEmpId} onChange={e => setSelectedEmpId(e.target.value)}><option value="">Selecione...</option>{employees.map(e => <option key={e.id} value={e.id}>{e.name} - {e.role}</option>)}</select></div>
+                  <div className="mb-8"><label className="block text-sm font-bold text-gray-700 mb-2">2. Tipo de Documento</label><div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div onClick={() => setDocType('advertencia')} className={`border p-4 rounded-xl cursor-pointer ${docType === 'advertencia' ? 'border-orange-500 bg-orange-50' : ''}`}><span className="text-xl block mb-2">🛡️</span><h4 className="font-bold text-gray-900">Advertência</h4></div>
+                          <div onClick={() => setDocType('rescisao')} className={`border p-4 rounded-xl cursor-pointer ${docType === 'rescisao' ? 'border-red-500 bg-red-50' : ''}`}><span className="text-xl block mb-2">⚠️</span><h4 className="font-bold text-gray-900">Rescisão</h4></div>
+                          <div onClick={() => setDocType('epi')} className={`border p-4 rounded-xl cursor-pointer ${docType === 'epi' ? 'border-green-500 bg-green-50' : ''}`}><span className="text-xl block mb-2">🦺</span><h4 className="font-bold text-gray-900">Recibo EPI</h4></div>
+                  </div></div>
+                  <button onClick={() => selectedEmpId ? setShowPreview(true) : alert('Selecione um funcionário')} className="w-full bg-blue-600 text-white font-bold py-4 rounded-lg">Gerar Documento</button>
               </div>
         </div>
     );
 }
 
-// --- TELAS PÚBLICAS E AUTENTICAÇÃO ---
-
+// --- LANDING PAGE (SaaS) ---
 function LandingPage({ onGoLogin }) {
   return (
-    <div className="text-center p-8 md:p-20 bg-white min-h-screen flex flex-col justify-center items-center w-full">
-      <div className="flex items-center space-x-2 mb-6">
-          <div className="w-16 h-16 rounded-lg bg-[#303863] flex items-center justify-center text-white font-black text-3xl shadow-lg">RH</div>
-          <h1 className="text-6xl font-black text-[#303863] tracking-tight">Fast</h1>
+    <div className="w-full min-h-screen bg-[#f8fafc] flex flex-col font-sans">
+      {/* Navbar Landing */}
+      <nav className="flex justify-between items-center p-6 lg:px-20 bg-white shadow-sm">
+          <div className="flex items-center space-x-2">
+              <div className="w-10 h-10 rounded bg-[#303863] flex items-center justify-center text-white font-black text-xl">RH</div>
+              <h1 className="text-2xl font-black text-[#303863] tracking-tight">Fast</h1>
+          </div>
+          <button onClick={onGoLogin} className="bg-blue-600 text-white px-6 py-2 rounded-full font-bold hover:bg-blue-700 transition">Entrar</button>
+      </nav>
+
+      {/* Hero Section */}
+      <div className="flex flex-col items-center justify-center text-center px-6 py-20">
+          <h2 className="text-5xl lg:text-6xl font-black text-[#2a3052] mb-6 tracking-tight max-w-4xl">O RH mais fácil que sua empresa já viu.</h2>
+          <p className="text-xl text-gray-500 max-w-2xl mb-10">Automatize cálculos de folha, gere PIX em lote e blinde sua empresa contra processos. Tudo na nuvem, sem planilhas complexas.</p>
+          <button onClick={onGoLogin} className="bg-blue-600 text-white px-10 py-4 rounded-full text-lg font-bold shadow-xl hover:bg-blue-700 hover:scale-105 transition">Começar Agora</button>
       </div>
-      <p className="text-2xl mb-12 text-gray-500 font-medium">Sua gestão de pessoal, rápida e inteligente.</p>
-      <button onClick={onGoLogin} className="bg-blue-600 text-white px-12 py-5 rounded-full text-xl font-bold shadow-2xl hover:bg-blue-700 hover:scale-105 transition-all duration-200">
-        Entrar no Sistema
-      </button>
+
+      {/* Planos (Pricing) */}
+      <div className="bg-white py-20 px-6 lg:px-20 border-t border-gray-100">
+          <div className="text-center mb-16">
+              <h3 className="text-3xl font-black text-[#2a3052]">Planos simples para qualquer tamanho</h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
+              
+              <div className="border border-gray-200 rounded-2xl p-8 flex flex-col hover:border-blue-500 transition shadow-sm">
+                  <h4 className="text-xl font-bold text-gray-800">Starter</h4>
+                  <p className="text-gray-500 text-sm mb-6">Para quem está começando</p>
+                  <p className="text-4xl font-black text-[#2a3052] mb-6">Grátis</p>
+                  <ul className="space-y-3 mb-8 flex-grow text-sm text-gray-600">
+                      <li>✅ Até 4 Funcionários</li>
+                      <li>✅ Cálculo de Folha</li>
+                      <li>✅ Holerites em PDF</li>
+                  </ul>
+                  <button onClick={onGoLogin} className="w-full bg-blue-50 text-blue-700 font-bold py-3 rounded-lg hover:bg-blue-100">Testar Grátis</button>
+              </div>
+
+              <div className="border-2 border-blue-600 rounded-2xl p-8 flex flex-col relative shadow-xl transform md:-translate-y-4 bg-white">
+                  <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-blue-600 text-white px-4 py-1 rounded-full text-xs font-bold tracking-wider uppercase">Mais Popular</div>
+                  <h4 className="text-xl font-bold text-gray-800">Essencial</h4>
+                  <p className="text-gray-500 text-sm mb-6">Para PMEs estruturadas</p>
+                  <p className="text-4xl font-black text-[#2a3052] mb-6">R$ 49<span className="text-lg">,90/mês</span></p>
+                  <ul className="space-y-3 mb-8 flex-grow text-sm text-gray-600">
+                      <li>✅ Até 15 Funcionários</li>
+                      <li>✅ Tudo do plano Starter</li>
+                      <li>✅ Copiar PIX em Lote</li>
+                      <li>✅ Alerta de Férias (Anti-Multa)</li>
+                  </ul>
+                  <button onClick={onGoLogin} className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg hover:bg-blue-700 shadow-md">Assinar Essencial</button>
+              </div>
+
+              <div className="border border-gray-200 rounded-2xl p-8 flex flex-col hover:border-blue-500 transition shadow-sm">
+                  <h4 className="text-xl font-bold text-gray-800">Master</h4>
+                  <p className="text-gray-500 text-sm mb-6">Fábricas e Indústrias</p>
+                  <p className="text-4xl font-black text-[#2a3052] mb-6">R$ 99<span className="text-lg">,90/mês</span></p>
+                  <ul className="space-y-3 mb-8 flex-grow text-sm text-gray-600">
+                      <li>✅ Funcionários Ilimitados</li>
+                      <li>✅ Tudo do plano Essencial</li>
+                      <li>✅ Gerador de Documentos Oficiais (Advertência, Rescisão)</li>
+                      <li>✅ Controle de Empréstimos</li>
+                  </ul>
+                  <button onClick={onGoLogin} className="w-full bg-blue-50 text-blue-700 font-bold py-3 rounded-lg hover:bg-blue-100">Assinar Master</button>
+              </div>
+
+          </div>
+      </div>
+
+      {/* Footer */}
+      <footer className="bg-[#1e233b] text-center py-8 text-gray-400 text-sm mt-auto">
+          <p>© 2026 DRG IMPORTS SAAS LTDA - Todos os direitos reservados.</p>
+          <p className="mt-2 text-xs">Termos de Uso • Política de Privacidade</p>
+      </footer>
     </div>
   );
 }
@@ -656,14 +648,15 @@ function AuthScreen({ onBack }) {
       </div>
       <div className="w-full md:w-1/2 bg-white p-8 md:p-16 flex flex-col justify-center items-center">
         <div className="w-full max-w-md bg-white">
-          <h2 className="text-3xl font-black mb-2 text-[#2a3052]">{isLogin ? 'Bem-vindo de volta' : 'Crie sua conta'}</h2>
+          <h2 className="text-3xl font-black mb-2 text-[#2a3052]">{isLogin ? 'Acessar Conta' : 'Criar Conta Grátis'}</h2>
           <div className="space-y-5 mt-8">
-              <input className="w-full p-4 border border-gray-300 rounded-xl outline-none" placeholder="E-mail" onChange={e => setEmail(e.target.value)} />
+              <input className="w-full p-4 border border-gray-300 rounded-xl outline-none" placeholder="E-mail corporativo" onChange={e => setEmail(e.target.value)} />
               <input className="w-full p-4 border border-gray-300 rounded-xl outline-none" type="password" placeholder="Senha" onChange={e => setPass(e.target.value)} />
           </div>
-          <button onClick={handleAuth} className="w-full bg-[#303863] text-white py-4 mt-8 rounded-xl font-bold text-lg">{isLogin ? 'Acessar Painel' : 'Criar Conta'}</button>
+          <button onClick={handleAuth} className="w-full bg-blue-600 text-white py-4 mt-8 rounded-xl font-bold text-lg hover:bg-blue-700 shadow">{isLogin ? 'Entrar' : 'Cadastrar'}</button>
           <div className="text-center mt-8 pt-6 border-t border-gray-100">
-              <button onClick={() => setIsLogin(!isLogin)} className="text-blue-600 font-bold hover:underline">{isLogin ? 'Cadastre-se' : 'Fazer Login'}</button>
+              <button onClick={() => setIsLogin(!isLogin)} className="text-blue-600 font-bold hover:underline">{isLogin ? 'Não tem conta? Cadastre-se' : 'Já tem conta? Fazer Login'}</button>
+              <br/><button onClick={onBack} className="text-sm text-gray-400 mt-4">← Voltar</button>
           </div>
         </div>
       </div>
