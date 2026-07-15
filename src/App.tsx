@@ -104,8 +104,15 @@ function Dashboard({ uid, onNavigate }) {
         return () => unsubscribe();
     }, [uid]);
 
-    const folhaEstimada = 14250.00; // Será dinâmico no futuro
-    const metaDiaria = (folhaEstimada / 30).toFixed(2);
+    // CÁLCULO INTELIGENTE DA FOLHA ESTIMADA E COFRINHO
+    const folhaEstimada = employees.reduce((total, emp) => {
+        const valor = parseFloat(emp.rate) || 0;
+        // Se for diarista, calcula uma média de 22 dias úteis no mês. Se for mensalista, pega o valor cheio.
+        const estimativaMensal = emp.type === 'Diarista' ? (valor * 22) : valor;
+        return total + estimativaMensal;
+    }, 0);
+
+    const metaDiaria = folhaEstimada > 0 ? (folhaEstimada / 30).toFixed(2) : "0.00";
 
     const handleLancarVale = async () => {
         if (!vale.employeeId || !vale.amount || !vale.date) {
@@ -149,13 +156,13 @@ function Dashboard({ uid, onNavigate }) {
                 
                 <div className="bg-[#10b981] rounded-xl p-6 text-white shadow-lg relative overflow-hidden">
                     <p className="text-green-100 font-medium mb-1">Folha Estimada (Mês)</p>
-                    <p className="text-4xl font-bold">R$ {folhaEstimada.toLocaleString('pt-BR')}</p>
+                    <p className="text-4xl font-bold">R$ {folhaEstimada.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
                     <span className="absolute right-4 bottom-4 text-5xl opacity-20">💰</span>
                 </div>
 
                 <div className="bg-white border-l-4 border-yellow-400 rounded-xl p-6 text-gray-800 shadow-lg relative">
                     <p className="text-gray-500 text-sm font-bold uppercase mb-1 flex items-center">🐖 Cofrinho Diário (Meta)</p>
-                    <p className="text-3xl font-bold text-[#2a3052]">R$ {metaDiaria}</p>
+                    <p className="text-3xl font-bold text-[#2a3052]">R$ {metaDiaria.replace('.', ',')}</p>
                     <p className="text-xs text-gray-400 mt-2 leading-tight">Guarde este valor por dia no caixa para pagar a folha sem sustos.</p>
                 </div>
 
@@ -244,7 +251,6 @@ function EmployeeManager({ uid }) {
   const initialState = { name: '', cpf: '', pix: '', role: '', type: 'Diarista', rate: '', admission: '' };
   const [empForm, setEmpForm] = useState(initialState);
 
-  // Escuta o banco de dados em tempo real
   useEffect(() => {
     const q = query(collection(db, 'companies', uid, 'employees'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
