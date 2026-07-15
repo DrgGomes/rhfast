@@ -4,14 +4,15 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, addDoc, onSnapshot, getDocs } from 'firebase/firestore';
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 
-// --- CONFIGURAÇÃO FIREBASE (Mantenha as suas chaves aqui) ---
+// --- CONFIGURAÇÃO FIREBASE (Chaves Reais) ---
 const firebaseConfig = {
-  apiKey: "COLE_AQUI_SUA_API_KEY",
-  authDomain: "COLE_AQUI_SEU_DOMAIN",
-  projectId: "COLE_AQUI_SEU_ID",
-  storageBucket: "COLE_AQUI_SEU_STORAGE",
-  messagingSenderId: "COLE_AQUI",
-  appId: "COLE_AQUI"
+  apiKey: "AIzaSyBiN6qptBjHUNuk5V429jUmfi8-R2W6IGE",
+  authDomain: "gen-lang-client-0208170765.firebaseapp.com",
+  projectId: "gen-lang-client-0208170765",
+  storageBucket: "gen-lang-client-0208170765.firebasestorage.app",
+  messagingSenderId: "386351187550",
+  appId: "1:386351187550:web:1103e9b53536be141b16cf",
+  measurementId: "G-7FHHNDY3KM"
 };
 
 const app = initializeApp(firebaseConfig);
@@ -21,10 +22,9 @@ const auth = getAuth(app);
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [page, setPage] = useState('landing'); // 'landing', 'login', 'dashboard', 'employees', etc.
+  const [page, setPage] = useState('landing'); 
 
   useEffect(() => {
-    // Escuta mudanças de autenticação
     onAuthStateChanged(auth, (u) => { 
       setUser(u); 
       if(u) {
@@ -33,7 +33,6 @@ export default function App() {
     });
   }, []);
 
-  // Se o usuário não estiver logado, mostra Landing Page ou Tela de Login
   if (!user) {
     if (page === 'landing') {
       return <LandingPage onGoLogin={() => setPage('login')} />;
@@ -44,8 +43,8 @@ export default function App() {
 
   // Layout Interno (Acesso Logado)
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col">
-      <nav className="bg-blue-600 text-white p-4 flex justify-between shadow-lg">
+    <div className="min-h-screen bg-gray-100 flex flex-col w-full">
+      <nav className="bg-blue-600 text-white p-4 flex justify-between shadow-lg w-full">
         <h1 className="font-bold text-xl cursor-pointer" onClick={() => setPage('dashboard')}>RH Fast</h1>
         <div className="space-x-4 flex items-center">
           <button className="hover:text-blue-200" onClick={() => setPage('dashboard')}>Início</button>
@@ -55,7 +54,7 @@ export default function App() {
           <button onClick={() => signOut(auth)} className="bg-blue-800 hover:bg-blue-900 px-3 py-1 rounded">Sair</button>
         </div>
       </nav>
-      <main className="p-6 flex-grow">
+      <main className="p-6 flex-grow w-full">
         {page === 'dashboard' && <Dashboard />}
         {page === 'employees' && <EmployeeManager uid={user.uid} />}
         {page === 'payroll' && <PayrollCalculator uid={user.uid} />}
@@ -69,13 +68,12 @@ export default function App() {
 
 function LandingPage({ onGoLogin }) {
   return (
-    <div className="text-center p-20 bg-white min-h-screen flex flex-col justify-center items-center">
+    <div className="text-center p-8 md:p-20 bg-white min-h-screen flex flex-col justify-center items-center w-full">
       <div className="flex items-center space-x-2 mb-6">
-          {/* Mockup simples do logo */}
           <div className="w-12 h-12 rounded-full bg-blue-600"></div>
           <h1 className="text-5xl font-bold text-blue-900">RH Fast</h1>
       </div>
-      <p className="text-2xl mb-10 text-gray-600">Chega de planilhas. Seu RH fácil em minutos.</p>
+      <p className="text-xl md:text-2xl mb-10 text-gray-600">Chega de planilhas. Seu RH fácil em minutos.</p>
       <button onClick={onGoLogin} className="bg-blue-600 text-white px-10 py-4 rounded-full text-lg font-bold shadow-lg hover:bg-blue-700 transition duration-150">
         Começar Agora
       </button>
@@ -83,9 +81,9 @@ function LandingPage({ onGoLogin }) {
   );
 }
 
-// --- NOVA TELA DE AUTENTICAÇÃO REFORMULADA ---
+// --- TELA DE AUTENTICAÇÃO REFORMULADA E RESPONSIVA ---
 function AuthScreen({ onBack }) {
-  const [isLogin, setIsLogin] = useState(true); // Controla se estamos no modo Login ou Cadastro
+  const [isLogin, setIsLogin] = useState(true); 
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
 
@@ -102,26 +100,24 @@ function AuthScreen({ onBack }) {
   };
 
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen w-full flex flex-col md:flex-row">
       {/* Coluna da Esquerda (Branding e Ilustração) */}
-      <div className="w-1/2 bg-teal-900 text-white p-16 flex flex-col justify-center items-start">
+      <div className="w-full md:w-1/2 bg-teal-900 text-white p-8 md:p-16 flex flex-col justify-center items-start">
           <div className="flex items-center space-x-2 mb-6">
-              {/* Logo Mockup */}
               <div className="w-10 h-10 rounded-full bg-white text-teal-900 flex items-center justify-center font-bold text-xl">RHF</div>
               <h1 className="text-3xl font-bold">RH Fast</h1>
           </div>
           
-          <p className="text-lg mb-12">Sua gestão de pessoal, rápida e simplificada.</p>
+          <p className="text-lg mb-8 md:mb-12">Sua gestão de pessoal, rápida e simplificada.</p>
           
-          {/* Mockup da Ilustração do Time (substitua por um SVG real se possível) */}
-          <div className="w-full h-80 bg-white/10 rounded-3xl flex items-center justify-center">
+          <div className="w-full h-64 md:h-80 bg-white/10 rounded-3xl flex items-center justify-center">
               <span className="text-white/40">Ilustração do Time</span>
           </div>
       </div>
 
       {/* Coluna da Direita (Formulário) */}
-      <div className="w-1/2 bg-white p-16 flex flex-col justify-center items-center">
-        <div className="w-full max-w-md bg-white p-10 rounded-3xl shadow-2xl">
+      <div className="w-full md:w-1/2 bg-white p-8 md:p-16 flex flex-col justify-center items-center">
+        <div className="w-full max-w-md bg-white p-8 md:p-10 rounded-3xl shadow-2xl">
           <h2 className="text-2xl font-bold mb-8 text-center text-gray-800">
             {isLogin ? 'Acesso Empresa' : 'Cadastrar Empresa'}
           </h2>
@@ -175,19 +171,18 @@ function Dashboard() { return <div className="p-10 text-center"><h2 className="t
 
 function EmployeeManager({ uid }) {
   const [emp, setEmp] = useState({ name: '', baseValue: 0, type: 'mensalista' });
+  
   const save = async () => {
-    // Validação simples
     if (!emp.name || !emp.baseValue) return alert("Preencha todos os campos.");
     try {
         await addDoc(collection(db, 'companies', uid, 'employees'), emp);
         alert('Colaborador cadastrado!');
-        // Limpa o form (básico)
         setEmp({ name: '', baseValue: 0, type: 'mensalista' });
     } catch(e) { alert(e.message); }
   };
   
   return (
-    <div className="bg-white p-6 rounded-lg shadow-lg max-w-xl mx-auto">
+    <div className="bg-white p-6 rounded-lg shadow-lg max-w-xl mx-auto w-full">
       <h2 className="text-xl font-bold mb-6 text-blue-900">Cadastrar Novo Colaborador</h2>
       <div className="space-y-3">
           <input className="block border p-3 rounded-lg w-full outline-none focus:ring-1 focus:ring-blue-300" placeholder="Nome" value={emp.name} onChange={e => setEmp({...emp, name: e.target.value})} />
@@ -212,7 +207,7 @@ function PayrollCalculator({ uid }) {
   };
   
   return (
-      <div className="p-10 bg-white shadow-lg rounded-xl max-w-2xl mx-auto text-center">
+      <div className="p-10 bg-white shadow-lg rounded-xl max-w-2xl mx-auto text-center w-full">
           <h2 className="text-xl font-bold mb-4 text-blue-900">Gerar Folha de Pagamento</h2>
           <p className="text-gray-600 mb-6">Em breve: carregue seus colaboradores e calcule os salários do mês.</p>
           <button onClick={closePayroll} className="bg-green-600 text-white p-3 px-6 rounded-full font-bold shadow hover:bg-green-700 transition">
@@ -223,5 +218,5 @@ function PayrollCalculator({ uid }) {
 }
 
 function Reports({ uid }) {
-    return <div className="p-10 bg-white shadow rounded"><h2>Histórico de Relatórios (A implementar)</h2></div>;
+    return <div className="p-10 bg-white shadow rounded w-full"><h2>Histórico de Relatórios (A implementar)</h2></div>;
 }
