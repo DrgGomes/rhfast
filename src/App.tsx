@@ -37,7 +37,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#f4f7fb] flex flex-col font-sans w-full">
-      {/* Oculta a navegação na hora de imprimir */}
       <nav className="bg-[#303863] text-white flex justify-between items-center shadow-md w-full px-8 py-3 print:hidden">
         <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setPage('dashboard')}>
             <div className="w-10 h-10 bg-white rounded flex items-center justify-center">
@@ -63,7 +62,6 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Na hora de imprimir, tira os paddings pra folha ficar limpa */}
       <main className="p-8 print:p-0 flex-grow w-full max-w-7xl mx-auto print:max-w-none">
         {page === 'dashboard' && <Dashboard uid={user.uid} onNavigate={setPage} />}
         {page === 'employees' && <EmployeeManager uid={user.uid} />}
@@ -296,10 +294,11 @@ function PayrollCalculator({ uid }) {
   );
 }
 
-// --- NOVO: HISTÓRICO, RELATÓRIOS E HOLERITES (COM IMPRESSÃO) ---
+// --- NOVO: HISTÓRICO, RELATÓRIOS (NOVO VISUAL) E HOLERITES ---
 function PaymentHistory({ uid }) {
     const [history, setHistory] = useState([]);
     const [selectedFolha, setSelectedFolha] = useState(null);
+    const [viewMode, setViewMode] = useState('list'); // 'list', 'report', 'holerites'
 
     useEffect(() => {
         const q = query(collection(db, 'companies', uid, 'history'), orderBy('createdAt', 'desc'));
@@ -307,7 +306,6 @@ function PaymentHistory({ uid }) {
         return () => unsub();
     }, [uid]);
 
-    // Função Mágica do PIX em Lote
     const handleCopyPix = (folha) => {
         let text = `*Pagamentos Folha (${formatDate(folha.periodStart)} a ${formatDate(folha.periodEnd)})*\n\n`;
         folha.details.forEach(d => {
@@ -323,99 +321,146 @@ function PaymentHistory({ uid }) {
         return `${d}/${m}/${y}`;
     };
 
-    if (selectedFolha) {
-        // TELA DE HOLERITES (FORMATADA PARA IMPRESSÃO)
+    const openReport = (folha) => {
+        setSelectedFolha(folha);
+        setViewMode('report');
+    };
+
+    // VISÃO 1: RELATÓRIO GERENCIAL DE PAGAMENTOS (BASEADO NA IMAGEM)
+    if (viewMode === 'report' && selectedFolha) {
+        return (
+            <div className="w-full animation-fade-in print:m-0 print:p-0">
+                {/* Top Action Bar */}
+                <div className="flex justify-between items-center mb-6 print:hidden">
+                    <button onClick={() => setViewMode('list')} className="text-gray-500 hover:text-blue-600 font-bold flex items-center">
+                        ← Voltar para Histórico
+                    </button>
+                    <div className="flex space-x-4">
+                        <button onClick={() => window.print()} className="bg-white border border-gray-300 text-gray-700 px-6 py-2 rounded-lg font-bold shadow-sm hover:bg-gray-50 flex items-center space-x-2">
+                            <span>🖨️ Imprimir Relatório</span>
+                        </button>
+                        <button onClick={() => setViewMode('holerites')} className="bg-[#4a55e8] text-white px-6 py-2 rounded-lg font-bold shadow-md hover:bg-blue-700 flex items-center space-x-2">
+                            <span>Ver Holerites ➔</span>
+                        </button>
+                    </div>
+                </div>
+
+                {/* Report Container */}
+                <div className="bg-white shadow-lg rounded-xl overflow-hidden border border-gray-200">
+                    {/* Header */}
+                    <div className="bg-[#1e233b] text-white p-8 flex justify-between items-center">
+                        <div>
+                            <h2 className="text-2xl font-black uppercase tracking-wider mb-1">SUA EMPRESA - RELATÓRIO</h2>
+                            <p className="text-gray-400 text-sm">Relatório Gerencial de Pagamentos</p>
+                        </div>
+                        <div className="text-right">
+                            <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">Período</p>
+                            <p className="text-xl font-bold">{formatDate(selectedFolha.periodStart)} - {formatDate(selectedFolha.periodEnd)}</p>
+                        </div>
+                    </div>
+
+                    {/* Table */}
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse text-sm">
+                            <thead>
+                                <tr className="bg-gray-50 text-gray-500 text-xs uppercase border-b border-gray-200">
+                                    <th className="p-4 font-bold">Colaborador</th>
+                                    <th className="p-4 text-center font-bold">Dias</th>
+                                    <th className="p-4 font-bold">Base</th>
+                                    <th className="p-4 font-bold">Bruto</th>
+                                    <th className="p-4 text-red-500 font-bold">Desc.</th>
+                                    <th className="p-4 text-blue-500 font-bold">Extra/Bônus</th>
+                                    <th className="p-4 font-bold">Líquido</th>
+                                    <th className="p-4 font-bold">PIX</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {selectedFolha.details.map((emp, idx) => {
+                                    const bruto = emp.type === 'Diarista' ? (emp.dias * emp.rate) : emp.rate;
+                                    const descontos = parseFloat(emp.faltas || 0) + parseFloat(emp.vales || 0);
+                                    return (
+                                        <tr key={idx} className="border-b hover:bg-gray-50">
+                                            <td className="p-4">
+                                                <p className="font-bold text-gray-800">{emp.name}</p>
+                                                <p className="text-xs text-gray-400 uppercase">{emp.role || 'Geral'}</p>
+                                            </td>
+                                            <td className="p-4 text-center">
+                                                <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded-full">
+                                                    {emp.type === 'Diarista' ? 'D' : 'M'}
+                                                </span>
+                                            </td>
+                                            <td className="p-4 text-gray-600">R$ {parseFloat(emp.rate).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
+                                            <td className="p-4 font-bold text-gray-800">R$ {parseFloat(bruto).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
+                                            <td className="p-4 text-red-500 font-bold">{descontos > 0 ? `(R$ ${parseFloat(descontos).toLocaleString('pt-BR', {minimumFractionDigits:2})})` : '-'}</td>
+                                            <td className="p-4 text-blue-500 font-bold">{emp.extra > 0 ? `R$ ${parseFloat(emp.extra).toLocaleString('pt-BR', {minimumFractionDigits:2})}` : 'R$ 0,00'}</td>
+                                            <td className="p-4 font-black text-gray-900 text-lg">R$ {parseFloat(emp.net).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
+                                            <td className="p-4 text-gray-600 text-xs">{emp.pix || 'Não Cadastrado'}</td>
+                                        </tr>
+                                    )
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="bg-[#2a3052] text-white p-6 flex justify-end items-center space-x-6">
+                        <p className="font-bold uppercase tracking-wider text-sm text-gray-300">Total Geral da Folha:</p>
+                        <p className="text-3xl font-black">R$ {selectedFolha.totalGeral.toLocaleString('pt-BR', {minimumFractionDigits:2})}</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // VISÃO 2: HOLERITES (PARA IMPRESSÃO INDIVIDUAL)
+    if (viewMode === 'holerites' && selectedFolha) {
         return (
             <div className="w-full animation-fade-in print:m-0 print:p-0">
                 <div className="flex justify-between items-center mb-8 print:hidden">
-                    <button onClick={() => setSelectedFolha(null)} className="text-gray-500 hover:text-blue-600 font-bold">← Voltar para Histórico</button>
+                    <button onClick={() => setViewMode('report')} className="text-gray-500 hover:text-blue-600 font-bold">← Voltar para Relatório</button>
                     <button onClick={() => window.print()} className="bg-blue-600 text-white px-6 py-2 rounded font-bold flex items-center space-x-2">
-                        <span>🖨️ Imprimir Todos (PDF)</span>
+                        <span>🖨️ Imprimir Holerites (PDF)</span>
                     </button>
                 </div>
 
                 <div className="print:block">
                     {selectedFolha.details.map((emp, idx) => (
                         <div key={idx} className="bg-white border-2 border-gray-300 p-8 mb-8 shadow-sm rounded break-inside-avoid print:shadow-none print:border-gray-800 print:mb-12 print:page-break-after-always">
-                            {/* CABEÇALHO HOLERITE */}
                             <div className="flex justify-between items-start border-b-2 border-gray-800 pb-4 mb-4">
-                                <div>
-                                    <h2 className="text-xl font-black uppercase text-gray-900">Sua Empresa / Fábrica</h2>
-                                    <p className="text-xs text-gray-500">Recibo de Pagamento de Salário</p>
-                                </div>
-                                <div className="text-right">
-                                    <p className="font-bold">Período Referência</p>
-                                    <p>{formatDate(selectedFolha.periodStart)} a {formatDate(selectedFolha.periodEnd)}</p>
-                                </div>
+                                <div><h2 className="text-xl font-black uppercase text-gray-900">Sua Empresa</h2><p className="text-xs text-gray-500">Recibo de Pagamento de Salário</p></div>
+                                <div className="text-right"><p className="font-bold">Período Referência</p><p>{formatDate(selectedFolha.periodStart)} a {formatDate(selectedFolha.periodEnd)}</p></div>
                             </div>
                             
-                            {/* DADOS FUNCIONÁRIO */}
                             <div className="flex justify-between border border-gray-300 p-3 mb-4 bg-gray-50">
                                 <div><p className="text-xs font-bold text-gray-500 uppercase">Funcionário</p><p className="font-bold text-gray-900">{emp.name}</p></div>
                                 <div><p className="text-xs font-bold text-gray-500 uppercase">Cargo</p><p className="font-bold text-gray-900">{emp.role || 'Geral'}</p></div>
                             </div>
 
-                            {/* TABELA DE VENCIMENTOS E DESCONTOS */}
                             <table className="w-full border-collapse border border-gray-300 mb-6 text-sm">
                                 <thead>
-                                    <tr className="bg-gray-100">
-                                        <th className="border border-gray-300 p-2 text-left">Descrição</th>
-                                        <th className="border border-gray-300 p-2 text-center w-24">Qtd.</th>
-                                        <th className="border border-gray-300 p-2 text-right w-32 text-green-700">Vencimentos</th>
-                                        <th className="border border-gray-300 p-2 text-right w-32 text-red-700">Descontos</th>
-                                    </tr>
+                                    <tr className="bg-gray-100"><th className="border border-gray-300 p-2 text-left">Descrição</th><th className="border border-gray-300 p-2 text-center w-24">Qtd.</th><th className="border border-gray-300 p-2 text-right w-32 text-green-700">Vencimentos</th><th className="border border-gray-300 p-2 text-right w-32 text-red-700">Descontos</th></tr>
                                 </thead>
                                 <tbody>
                                     <tr>
                                         <td className="border border-gray-300 p-2">Salário Base / Diárias</td>
                                         <td className="border border-gray-300 p-2 text-center">{emp.type === 'Diarista' ? `${emp.dias} dias` : '1 mês'}</td>
-                                        <td className="border border-gray-300 p-2 text-right text-green-700">
-                                            {(emp.type === 'Diarista' ? emp.dias * emp.rate : parseFloat(emp.rate)).toLocaleString('pt-BR', {minimumFractionDigits:2})}
-                                        </td>
+                                        <td className="border border-gray-300 p-2 text-right text-green-700">{(emp.type === 'Diarista' ? emp.dias * emp.rate : parseFloat(emp.rate)).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
                                         <td className="border border-gray-300 p-2 text-right"></td>
                                     </tr>
-                                    {emp.extra > 0 && (
-                                        <tr>
-                                            <td className="border border-gray-300 p-2">Horas Extras / Bônus</td>
-                                            <td className="border border-gray-300 p-2 text-center">-</td>
-                                            <td className="border border-gray-300 p-2 text-right text-green-700">{parseFloat(emp.extra).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
-                                            <td className="border border-gray-300 p-2 text-right"></td>
-                                        </tr>
-                                    )}
-                                    {emp.faltas > 0 && (
-                                        <tr>
-                                            <td className="border border-gray-300 p-2">Faltas / Atrasos</td>
-                                            <td className="border border-gray-300 p-2 text-center">-</td>
-                                            <td className="border border-gray-300 p-2 text-right"></td>
-                                            <td className="border border-gray-300 p-2 text-right text-red-700">{parseFloat(emp.faltas).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
-                                        </tr>
-                                    )}
-                                    {emp.vales > 0 && (
-                                        <tr>
-                                            <td className="border border-gray-300 p-2">Adiantamentos (Vales)</td>
-                                            <td className="border border-gray-300 p-2 text-center">-</td>
-                                            <td className="border border-gray-300 p-2 text-right"></td>
-                                            <td className="border border-gray-300 p-2 text-right text-red-700">{parseFloat(emp.vales).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
-                                        </tr>
-                                    )}
+                                    {emp.extra > 0 && (<tr><td className="border border-gray-300 p-2">Horas Extras / Bônus</td><td className="border border-gray-300 p-2 text-center">-</td><td className="border border-gray-300 p-2 text-right text-green-700">{parseFloat(emp.extra).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td><td className="border border-gray-300 p-2 text-right"></td></tr>)}
+                                    {emp.faltas > 0 && (<tr><td className="border border-gray-300 p-2">Faltas / Atrasos</td><td className="border border-gray-300 p-2 text-center">-</td><td className="border border-gray-300 p-2 text-right"></td><td className="border border-gray-300 p-2 text-right text-red-700">{parseFloat(emp.faltas).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td></tr>)}
+                                    {emp.vales > 0 && (<tr><td className="border border-gray-300 p-2">Adiantamentos (Vales)</td><td className="border border-gray-300 p-2 text-center">-</td><td className="border border-gray-300 p-2 text-right"></td><td className="border border-gray-300 p-2 text-right text-red-700">{parseFloat(emp.vales).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td></tr>)}
                                 </tbody>
                             </table>
 
-                            {/* TOTAL E ASSINATURA */}
                             <div className="flex justify-between items-end">
                                 <div><p className="text-sm text-gray-500">Chave PIX: {emp.pix || 'Não cadastrada'}</p></div>
-                                <div className="border-2 border-gray-800 p-4 rounded text-center">
-                                    <p className="text-sm font-bold uppercase text-gray-600">Total Líquido</p>
-                                    <p className="text-3xl font-black">R$ {emp.net.toLocaleString('pt-BR', {minimumFractionDigits:2})}</p>
-                                </div>
+                                <div className="border-2 border-gray-800 p-4 rounded text-center"><p className="text-sm font-bold uppercase text-gray-600">Total Líquido</p><p className="text-3xl font-black">R$ {emp.net.toLocaleString('pt-BR', {minimumFractionDigits:2})}</p></div>
                             </div>
                             
                             <div className="mt-12 pt-8 border-t border-gray-300 text-center text-xs text-gray-500">
                                 <p className="mb-8">Declaro ter recebido a importância líquida discriminada neste recibo.</p>
-                                <div className="flex justify-around">
-                                    <div className="w-1/3 border-t border-black pt-1">Data</div>
-                                    <div className="w-1/2 border-t border-black pt-1">Assinatura de {emp.name}</div>
-                                </div>
+                                <div className="flex justify-around"><div className="w-1/3 border-t border-black pt-1">Data</div><div className="w-1/2 border-t border-black pt-1">Assinatura de {emp.name}</div></div>
                             </div>
                         </div>
                     ))}
@@ -424,7 +469,7 @@ function PaymentHistory({ uid }) {
         );
     }
 
-    // TELA DE HISTÓRICO NORMAL
+    // VISÃO PADRÃO: LISTA DE HISTÓRICO
     return (
         <div className="w-full animation-fade-in">
             <div className="flex items-center space-x-3 mb-8">
@@ -450,8 +495,8 @@ function PaymentHistory({ uid }) {
                                 <button onClick={() => handleCopyPix(folha)} className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg font-bold hover:bg-indigo-100 transition text-sm">
                                     📋 PIX em Lote
                                 </button>
-                                <button onClick={() => setSelectedFolha(folha)} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 transition text-sm shadow">
-                                    Ver Holerites
+                                <button onClick={() => openReport(folha)} className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 transition text-sm shadow">
+                                    Abrir Relatório
                                 </button>
                             </div>
                         </div>
@@ -463,7 +508,6 @@ function PaymentHistory({ uid }) {
     );
 }
 
-// --- NOVO: GERADOR DE DOCUMENTOS ---
 function DocumentGenerator({ uid }) {
     const [employees, setEmployees] = useState([]);
     const [selectedEmpId, setSelectedEmpId] = useState('');
@@ -492,7 +536,6 @@ function DocumentGenerator({ uid }) {
                     <button onClick={() => window.print()} className="bg-green-600 text-white px-6 py-2 rounded font-bold shadow">🖨️ Imprimir / Salvar PDF</button>
                 </div>
                 
-                {/* PAPEL A4 PARA IMPRESSÃO */}
                 <div className="bg-white p-12 border shadow max-w-4xl mx-auto print:shadow-none print:border-none text-justify text-lg leading-relaxed">
                     <div className="text-center mb-12 border-b-2 border-black pb-6">
                         <h1 className="text-2xl font-black uppercase">Sua Empresa</h1>
