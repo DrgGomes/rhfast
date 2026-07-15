@@ -91,7 +91,6 @@ function Dashboard({ uid, onNavigate }) {
     const [employees, setEmployees] = useState([]);
     const [showValeModal, setShowValeModal] = useState(false);
     
-    // Form do Vale
     const [vale, setVale] = useState({ employeeId: '', amount: '', date: '', reason: '' });
 
     useEffect(() => {
@@ -104,10 +103,8 @@ function Dashboard({ uid, onNavigate }) {
         return () => unsubscribe();
     }, [uid]);
 
-    // CÁLCULO INTELIGENTE DA FOLHA ESTIMADA E COFRINHO
     const folhaEstimada = employees.reduce((total, emp) => {
         const valor = parseFloat(emp.rate) || 0;
-        // Se for diarista, calcula uma média de 22 dias úteis no mês. Se for mensalista, pega o valor cheio.
         const estimativaMensal = emp.type === 'Diarista' ? (valor * 22) : valor;
         return total + estimativaMensal;
     }, 0);
@@ -197,7 +194,6 @@ function Dashboard({ uid, onNavigate }) {
                 </div>
             </div>
 
-            {/* MODAL DE LANÇAMENTO DE VALE */}
             {showValeModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col">
@@ -402,12 +398,192 @@ function EmployeeManager({ uid }) {
   );
 }
 
+// --- NOVO MÓDULO DE CÁLCULO DE FOLHA ---
 function PayrollCalculator({ uid }) {
-  const closePayroll = async () => { alert("Cálculo processado e salvo no Histórico!"); };
+  const [employees, setEmployees] = useState([]);
+  const [vales, setVales] = useState([]);
+  const [period, setPeriod] = useState({ start: '', end: '' });
+  const [inputs, setInputs] = useState({});
+
+  useEffect(() => {
+      // Puxar Funcionários
+      const unsubEmp = onSnapshot(query(collection(db, 'companies', uid, 'employees')), (snap) => {
+          setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+      // Puxar Vales Pendentes
+      const unsubVales = onSnapshot(query(collection(db, 'companies', uid, 'vales')), (snap) => {
+          setVales(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(v => v.status === 'pendente'));
+      });
+      return () => { unsubEmp(); unsubVales(); };
+  }, [uid]);
+
+  const handleInputChange = (empId, field, value) => {
+      setInputs(prev => ({
+          ...prev,
+          [empId]: { ...(prev[empId] || {}), [field]: value }
+      }));
+  };
+
+  const calculateNet = (emp) => {
+      const empInputs = inputs[emp.id] || {};
+      const dias = parseFloat(empInputs.dias) || 0;
+      const extra = parseFloat(empInputs.extra) || 0;
+      const faltas = parseFloat(empInputs.faltas) || 0;
+
+      const baseCalc = emp.type === 'Diarista' ? (dias * parseFloat(emp.rate || 0)) : parseFloat(emp.rate || 0);
+      const empVales = vales.filter(v => v.employeeId === emp.id).reduce((acc, curr) => acc + parseFloat(curr.amount || 0), 0);
+
+      return baseCalc + extra - faltas - empVales;
+  };
+
+  const calculateTotalGeral = () => {
+      return employees.reduce((acc, emp) => acc + calculateNet(emp), 0);
+  };
+
+  const closePayroll = async () => {
+      if(!period.start || !period.end) return alert("Defina o período da folha (Início e Fim).");
+      if(employees.length === 0) return alert("Nenhum funcionário cadastrado para processar.");
+
+      try {
+          const folhaData = {
+              periodStart: period.start,
+              periodEnd: period.end,
+              totalGeral: calculateTotalGeral(),
+              createdAt: new Date().toISOString(),
+              details: employees.map(emp => {
+                  const empInputs = inputs[emp.id] || {};
+                  const empVales = vales.filter(v => v.employeeId === emp.id).reduce((acc, curr) => acc + parseFloat(curr.amount || 0), 0);
+                  return {
+                      employeeId: emp.id,
+                      name: emp.name,
+                      role: emp.role,
+                      type: emp.type,
+                      rate: emp.rate,
+                      dias: empInputs.dias || 0,
+                      extra: empInputs.extra || 0,
+                      faltas: empInputs.faltas || 0,
+                      vales: empVales,
+                      net: calculateNet(emp)
+                  };
+              })
+          };
+
+          // Salva folha no histórico
+          await addDoc(collection(db, 'companies', uid, 'history'), folhaData);
+
+          // Atualiza vales para pago
+          for (const v of vales) {
+              await updateDoc(doc(db, 'companies', uid, 'vales', v.id), { status: 'pago' });
+          }
+
+          alert("Folha fechada com sucesso! Verifique os recibos na aba Histórico.");
+          setInputs({}); 
+      } catch(e) {
+          alert("Erro ao fechar folha: " + e.message);
+      }
+  };
+
   return (
-      <div className="w-full animation-fade-in text-center p-20 bg-white rounded-xl shadow-sm border border-gray-200">
-          <h2 className="text-2xl font-bold text-[#2a3052] mb-4">Módulo de Folha em Construção</h2>
-          <p className="text-gray-500">A interface de cálculo será conectada ao banco na próxima etapa.</p>
+      <div className="w-full animation-fade-in">
+          <div className="flex justify-between items-center mb-8">
+              <div className="flex items-center space-x-3">
+                  <span className="text-3xl bg-green-100 text-green-600 p-2 rounded-lg">🧮</span>
+                  <div>
+                      <h2 className="text-3xl font-bold text-[#2a3052]">Calcular Folha</h2>
+                      <p className="text-gray-500">Defina o período e preencha as variáveis do mês.</p>
+                  </div>
+              </div>
+              <div className="flex space-x-4 items-center bg-white p-2 rounded-lg shadow-sm border border-gray-200">
+                  <div className="px-2 text-sm font-bold text-gray-400">PERÍODO:</div>
+                  <input type="date" className="border-none outline-none text-gray-700 bg-gray-50 p-2 rounded cursor-pointer" value={period.start} onChange={e => setPeriod({...period, start: e.target.value})} />
+                  <span className="text-gray-400">até</span>
+                  <input type="date" className="border-none outline-none text-gray-700 bg-gray-50 p-2 rounded cursor-pointer" value={period.end} onChange={e => setPeriod({...period, end: e.target.value})} />
+              </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow overflow-hidden">
+              <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse min-w-max">
+                      <thead>
+                          <tr className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wider border-b">
+                              <th className="p-4">Colaborador</th>
+                              <th className="p-4 text-center">Dias Trab.</th>
+                              <th className="p-4 text-center">R$ Extra / Bônus</th>
+                              <th className="p-4 text-center">Desc. Faltas</th>
+                              <th className="p-4 text-center">Vales Pendentes</th>
+                              <th className="p-4 text-right">Líquido Final</th>
+                          </tr>
+                      </thead>
+                      <tbody className="text-sm">
+                          {employees.map(emp => {
+                              const empVales = vales.filter(v => v.employeeId === emp.id);
+                              const totalVales = empVales.reduce((acc, curr) => acc + parseFloat(curr.amount || 0), 0);
+                              const net = calculateNet(emp);
+                              
+                              return (
+                                  <tr key={emp.id} className="border-b hover:bg-gray-50">
+                                      <td className="p-4">
+                                          <p className="font-bold text-gray-800">{emp.name}</p>
+                                          <p className="text-xs text-gray-400">{emp.role || 'Sem cargo'} • R$ {emp.rate} ({emp.type})</p>
+                                      </td>
+                                      <td className="p-4 text-center">
+                                          <input 
+                                              type="number" 
+                                              placeholder={emp.type === 'Mensalista' ? "Mês Cheio" : "Dias"} 
+                                              disabled={emp.type === 'Mensalista'}
+                                              className={`w-20 border p-2 rounded text-center outline-none focus:border-blue-500 ${emp.type === 'Mensalista' ? 'bg-gray-100 text-gray-400' : ''}`}
+                                              value={inputs[emp.id]?.dias || ''}
+                                              onChange={e => handleInputChange(emp.id, 'dias', e.target.value)}
+                                          />
+                                      </td>
+                                      <td className="p-4 text-center">
+                                          <input 
+                                              type="number" 
+                                              placeholder="0.00" 
+                                              className="w-24 border p-2 rounded text-green-600 font-medium text-center outline-none focus:border-blue-500 bg-green-50" 
+                                              value={inputs[emp.id]?.extra || ''}
+                                              onChange={e => handleInputChange(emp.id, 'extra', e.target.value)}
+                                          />
+                                      </td>
+                                      <td className="p-4 text-center">
+                                          <input 
+                                              type="number" 
+                                              placeholder="0.00" 
+                                              className="w-24 border p-2 rounded text-red-600 font-medium text-center outline-none focus:border-blue-500 bg-red-50" 
+                                              value={inputs[emp.id]?.faltas || ''}
+                                              onChange={e => handleInputChange(emp.id, 'faltas', e.target.value)}
+                                          />
+                                      </td>
+                                      <td className="p-4 text-center">
+                                          <div className="flex flex-col items-center">
+                                              <input type="text" value={totalVales > 0 ? totalVales.toFixed(2) : "0.00"} className="w-24 border p-2 rounded text-red-600 font-medium text-center outline-none bg-gray-100" readOnly />
+                                              <span className="text-[10px] text-gray-400 mt-1">{empVales.length} Vale(s) puxado(s)</span>
+                                          </div>
+                                      </td>
+                                      <td className="p-4 text-right">
+                                          <p className="font-black text-lg text-[#2a3052]">R$ {net.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                                      </td>
+                                  </tr>
+                              );
+                          })}
+                          {employees.length === 0 && (
+                              <tr>
+                                  <td colSpan="6" className="p-8 text-center text-gray-500">Nenhum funcionário para calcular.</td>
+                              </tr>
+                          )}
+                      </tbody>
+                  </table>
+              </div>
+              <div className="p-6 bg-gray-50 flex justify-between items-center border-t border-gray-200">
+                  <div>
+                      <p className="text-sm text-gray-500">Total geral desta folha:</p>
+                      <p className="text-2xl font-black text-[#2a3052]">R$ {calculateTotalGeral().toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  </div>
+                  <button onClick={closePayroll} className="bg-green-600 text-white px-8 py-4 rounded-lg font-bold text-lg hover:bg-green-700 transition shadow-lg flex items-center space-x-2">
+                      <span>✓ Fechar Folha e Gerar Recibos</span>
+                  </button>
+              </div>
+          </div>
       </div>
   );
 }
@@ -416,7 +592,7 @@ function PaymentHistory({ uid }) {
     return (
         <div className="w-full animation-fade-in text-center p-20 bg-white rounded-xl shadow-sm border border-gray-200">
           <h2 className="text-2xl font-bold text-[#2a3052] mb-4">Histórico em Construção</h2>
-          <p className="text-gray-500">Aqui aparecerão os fechamentos de folha.</p>
+          <p className="text-gray-500">As folhas fechadas na aba 'Calcular' aparecerão aqui.</p>
       </div>
     );
 }
